@@ -1,19 +1,23 @@
 // ফাইল পাথ: app/api/streams/route.ts
 import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb'; // ৩ ধাপ পেছনে গিয়ে lib ফোল্ডার খুঁজে নেবে
+import clientPromise from '@/lib/mongodb'; 
 
 export const dynamic = 'force-dynamic'; 
 
 export async function GET() {
     try {
         const client = await clientPromise;
+        
+        // আপনার বটের আসল ডেটাবেস নাম (প্রয়োজনে আপনার বটের নাম অনুযায়ী পরিবর্তন করতে পারেন)
         const db = client.db("all_in_one_reborn_db");
         
-        // posted_streams থেকে সব লাইভ স্ট্রিম টেনে আনা হচ্ছে
+        // এখানে আপনার বটের কালেকশনের নাম দেওয়া হয়েছে। 
+        // আপনার বটের কোড অনুযায়ী এটি 'posted_col' অথবা 'links_col' হতে পারে।
+        // নিচে তিনটির যেকোনো একটি সক্রিয় (uncomment) করে চেক করতে পারেন। বর্তমানে 'posted_col' দেওয়া আছে।
         const streams = await db
-            .collection("posted_streams")
+            .collection("posted_col") 
             .find({})
-            .sort({ posted_at: -1 }) // নতুন পোস্ট আগে দেখাবে
+            .sort({ posted_at: -1 }) // নতুন লিংক আগে দেখাবে
             .toArray();
 
         return NextResponse.json({ 
