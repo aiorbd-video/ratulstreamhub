@@ -2,7 +2,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
 
 interface Stream {
   _id: string;
@@ -26,14 +25,17 @@ export default function Home() {
         if (data.success) {
           const cleanedStreams = data.streams.map((stream: any) => {
             let rawTitle = stream.title || "";
+            // এখন ডেটাবেস থেকেই পারফেক্ট লোগো আসবে, তাই সরাসরি সেটা নিচ্ছি
             let finalLogo = stream.logo || "";
 
-            const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
-            if (logoMatch) {
-              finalLogo = logoMatch[1];
-            } else {
-              const urlMatch = rawTitle.match(/(https?:\/\/[^\s,]+)/);
-              if (urlMatch && !finalLogo) finalLogo = urlMatch[1];
+            // সেফটি ফলব্যাক (যদি বটের ফিল্টার মিস করে)
+            if (!finalLogo) {
+              const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
+              if (logoMatch) finalLogo = logoMatch[1];
+              else {
+                const urlMatch = rawTitle.match(/(https?:\/\/[^\s,]+)/);
+                if (urlMatch) finalLogo = urlMatch[1];
+              }
             }
 
             rawTitle = rawTitle.replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "");
@@ -104,14 +106,17 @@ export default function Home() {
               >
                 <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                   {stream.logo && stream.logo.startsWith('http') ? (
-                    /* 🎯 এখানে প্রক্সি API কল করা হয়েছে */
-                    <Image
-                      src={`/api/proxy-image?url=${encodeURIComponent(stream.logo)}`}
+                    /* 🎯 প্রক্সি বাদ দিয়ে সরাসরি অরিজিনাল ছবি লোড করা হলো */
+                    <img
+                      src={stream.logo}
                       alt={stream.title}
-                      fill
-                      className="object-cover group-hover:scale-105 transition-transform duration-500"
-                      sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
-                      unoptimized={true}
+                      className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        // যদি সার্ভার থেকে ছবি ব্লক থাকে, তাহলে কোনো এরর না দেখিয়ে এই ডিফল্ট ছবি দেখাবে
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = "https://placehold.co/600x400/1e293b/ef4444?text=LIVE+TV&font=montserrat";
+                      }}
                     />
                   ) : (
                     <span className="text-4xl">📺</span>
