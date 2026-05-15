@@ -7,17 +7,13 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
     try {
         const client = await clientPromise;
-        
-        // আপনার বটের আসল ডেটাবেস নাম (প্রয়োজনে আপনার বটের নাম অনুযায়ী পরিবর্তন করতে পারেন)
         const db = client.db("all_in_one_reborn_db");
         
-        // এখানে আপনার বটের কালেকশনের নাম দেওয়া হয়েছে। 
-        // আপনার বটের কোড অনুযায়ী এটি 'posted_col' অথবা 'links_col' হতে পারে।
-        // নিচে তিনটির যেকোনো একটি সক্রিয় (uncomment) করে চেক করতে পারেন। বর্তমানে 'posted_col' দেওয়া আছে।
+        // ভুল "posted_col" এর বদলে আসল নাম "posted_streams" দেওয়া হলো
         const streams = await db
-            .collection("posted_col") 
+            .collection("posted_streams") 
             .find({})
-            .sort({ posted_at: -1 }) // নতুন লিংক আগে দেখাবে
+            .sort({ posted_at: -1 })
             .toArray();
 
         return NextResponse.json({ 
