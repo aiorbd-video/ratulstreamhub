@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image'; // 🎯 Next.js এর পাওয়ারফুল ইমেজ কম্পোনেন্ট
 
 interface Stream {
   _id: string;
@@ -77,21 +78,19 @@ export default function Home() {
               >
                 <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                   {stream.logo && stream.logo.startsWith('http') ? (
-                    <img
+                    // 🎯 Next.js এর প্রক্সি ইমেজ ইউজ করা হলো
+                    <Image
                       src={stream.logo}
                       alt={stream.title}
-                      className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
-                      loading="lazy"
-                      referrerPolicy="no-referrer" /* 🎯 সিকিউরিটি বাইপাস ট্রিক */
-                      onError={(e) => {
-                        /* 🎯 যদি ছবি সত্যিই ব্লক থাকে, তবে ভাঙা ছবির বদলে এই ডিফল্ট ছবি দেখাবে */
-                        e.currentTarget.src = "https://placehold.co/600x400/0f172a/ef4444?text=LIVE+TV";
-                      }}
+                      fill
+                      className="object-cover group-hover:scale-105 transition-transform duration-500"
+                      sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
+                      unoptimized={true} // 🎯 অরিজিনাল সার্ভার থেকে আন-অপ্টিমাইজড ডেটা বাইপাস করার ট্রিক
                     />
                   ) : (
                     <span className="text-4xl">📺</span>
                   )}
-                  <span className="absolute top-2 left-2 bg-red-600 text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider animate-pulse shadow">
+                  <span className="absolute top-2 left-2 bg-red-600 text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider animate-pulse shadow z-10">
                     LIVE
                   </span>
                 </div>
