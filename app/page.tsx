@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image'; // 🎯 Next.js এর পাওয়ারফুল ইমেজ কম্পোনেন্ট
+import Image from 'next/image';
 
 interface Stream {
   _id: string;
@@ -22,8 +22,41 @@ export default function Home() {
       try {
         const res = await fetch('/api/streams');
         const data = await res.json();
+        
         if (data.success) {
-          setStreams(data.streams);
+          // 🎯 ম্যাজিক ক্লিনার: ডেটাবেসের ময়লা ডেটা ফিল্টার করার লজিক
+          const cleanedStreams = data.streams.map((stream: any) => {
+            let rawTitle = stream.title || "";
+            let finalLogo = stream.logo || "";
+
+            // ১. টাইটেলের ভেতর tvg-logo থাকলে সেটা বের করে লোগোতে বসানো
+            const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
+            if (logoMatch) {
+              finalLogo = logoMatch[1];
+            } else {
+              // যদি কোটেশন ছাড়া কোনো লিংক টাইটেলে থাকে
+              const urlMatch = rawTitle.match(/(https?:\/\/[^\s,]+)/);
+              if (urlMatch && !finalLogo) finalLogo = urlMatch[1];
+            }
+
+            // ২. টাইটেল থেকে tvg- এর হাবিজাবি ট্যাগগুলো মুছে ফেলা
+            rawTitle = rawTitle.replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "");
+            
+            // ৩. লিংকের অংশ বা w_300,q_85 জাতীয় লেখা মুছে ফেলা
+            rawTitle = rawTitle.replace(/(https?:\/\/[^\s]+)/g, "");
+            rawTitle = rawTitle.replace(/w_[0-9]+,q_[0-9]+\/[^\s]+/g, "");
+
+            // ৪. অতিরিক্ত কমা, স্পেস বা ড্যাশ পরিষ্কার করে ফ্রেশ টাইটেল বানানো
+            let cleanTitle = rawTitle.replace(/^[,-\s]+/, "").trim();
+
+            return {
+              ...stream,
+              title: cleanTitle || "Live Stream", // যদি সব মুছে গিয়ে ফাঁকা হয়ে যায়
+              logo: finalLogo
+            };
+          });
+
+          setStreams(cleanedStreams);
         }
       } catch (error) {
         console.error('Failed to fetch streams:', error);
@@ -78,14 +111,13 @@ export default function Home() {
               >
                 <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                   {stream.logo && stream.logo.startsWith('http') ? (
-                    // 🎯 Next.js এর প্রক্সি ইমেজ ইউজ করা হলো
                     <Image
                       src={stream.logo}
                       alt={stream.title}
                       fill
                       className="object-cover group-hover:scale-105 transition-transform duration-500"
                       sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
-                      unoptimized={true} // 🎯 অরিজিনাল সার্ভার থেকে আন-অপ্টিমাইজড ডেটা বাইপাস করার ট্রিক
+                      unoptimized={true}
                     />
                   ) : (
                     <span className="text-4xl">📺</span>
@@ -97,8 +129,8 @@ export default function Home() {
 
                 <div className="p-4 flex flex-col flex-grow justify-between gap-3">
                   <div>
-                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wide block mb-1">
-                      {stream.group}
+                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wide block mb-1 line-clamp-1">
+                      {stream.group || 'Live Sports'}
                     </span>
                     <h3 className="font-semibold text-sm line-clamp-2 text-slate-200 group-hover:text-white transition-colors">
                       {stream.title}
