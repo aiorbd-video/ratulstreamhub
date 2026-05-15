@@ -24,34 +24,27 @@ export default function Home() {
         const data = await res.json();
         
         if (data.success) {
-          // 🎯 ম্যাজিক ক্লিনার: ডেটাবেসের ময়লা ডেটা ফিল্টার করার লজিক
           const cleanedStreams = data.streams.map((stream: any) => {
             let rawTitle = stream.title || "";
             let finalLogo = stream.logo || "";
 
-            // ১. টাইটেলের ভেতর tvg-logo থাকলে সেটা বের করে লোগোতে বসানো
             const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
             if (logoMatch) {
               finalLogo = logoMatch[1];
             } else {
-              // যদি কোটেশন ছাড়া কোনো লিংক টাইটেলে থাকে
               const urlMatch = rawTitle.match(/(https?:\/\/[^\s,]+)/);
               if (urlMatch && !finalLogo) finalLogo = urlMatch[1];
             }
 
-            // ২. টাইটেল থেকে tvg- এর হাবিজাবি ট্যাগগুলো মুছে ফেলা
             rawTitle = rawTitle.replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "");
-            
-            // ৩. লিংকের অংশ বা w_300,q_85 জাতীয় লেখা মুছে ফেলা
             rawTitle = rawTitle.replace(/(https?:\/\/[^\s]+)/g, "");
             rawTitle = rawTitle.replace(/w_[0-9]+,q_[0-9]+\/[^\s]+/g, "");
 
-            // ৪. অতিরিক্ত কমা, স্পেস বা ড্যাশ পরিষ্কার করে ফ্রেশ টাইটেল বানানো
             let cleanTitle = rawTitle.replace(/^[,-\s]+/, "").trim();
 
             return {
               ...stream,
-              title: cleanTitle || "Live Stream", // যদি সব মুছে গিয়ে ফাঁকা হয়ে যায়
+              title: cleanTitle || "Live Stream",
               logo: finalLogo
             };
           });
@@ -111,8 +104,9 @@ export default function Home() {
               >
                 <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                   {stream.logo && stream.logo.startsWith('http') ? (
+                    /* 🎯 এখানে প্রক্সি API কল করা হয়েছে */
                     <Image
-                      src={stream.logo}
+                      src={`/api/proxy-image?url=${encodeURIComponent(stream.logo)}`}
                       alt={stream.title}
                       fill
                       className="object-cover group-hover:scale-105 transition-transform duration-500"
