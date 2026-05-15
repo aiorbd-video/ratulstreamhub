@@ -21,8 +21,7 @@ export default function WatchPage() {
         const data = await res.json();
         if (data.success) {
           setStream(data.stream);
-          // 🎯 কনসোলেও লিংকটি প্রিন্ট করে দিচ্ছি চেক করার জন্য
-          console.log("✅ ডাটাবেস থেকে পাওয়া লিংক:", data.stream.url);
+          console.log("✅ ডাটাবেস থেকে পাওয়া লিংক:", data.stream.stream_url);
         }
       } catch (error) {
         console.error("Error fetching stream:", error);
@@ -34,12 +33,14 @@ export default function WatchPage() {
   }, [params.id]);
 
   useEffect(() => {
-    if (!stream || !stream.url || !videoRef.current) return;
+    // 🎯 এখানে url এর বদলে stream_url করে দেওয়া হয়েছে
+    if (!stream || !stream.stream_url || !videoRef.current) return;
 
     let hls: Hls;
     const video = videoRef.current;
     
-    let currentUrl = stream.url.replace('http://', 'https://');
+    // 🎯 এখানেও stream_url
+    let currentUrl = stream.stream_url.replace('http://', 'https://');
     let isUsingProxy = false;
 
     const initPlayer = (playUrl: string) => {
@@ -64,7 +65,8 @@ export default function WatchPage() {
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !isUsingProxy) {
               console.log("CORS Error detected. Retrying with Proxy...");
               isUsingProxy = true;
-              const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(stream.url)}`;
+              // 🎯 এখানেও stream_url
+              const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(stream.stream_url)}`;
               initPlayer(proxyUrl);
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
               hls.recoverMediaError();
@@ -134,11 +136,11 @@ export default function WatchPage() {
                 {stream.title}
               </h1>
               
-              {/* 🎯 এই অংশটি লিংকটি স্ক্রিনে দেখাবে */}
               <div className="mt-4 p-4 bg-black/50 rounded-xl border border-slate-800/50">
                 <p className="text-xs text-slate-400 font-mono break-all">
                   <span className="text-red-500 font-bold mr-2">🔗 Stream Link:</span>
-                  {stream.url ? stream.url : "লিংক পাওয়া যায়নি!"}
+                  {/* 🎯 এখানেও stream_url করে দেওয়া হয়েছে */}
+                  {stream.stream_url ? stream.stream_url : "লিংক পাওয়া যায়নি!"}
                 </p>
               </div>
 
