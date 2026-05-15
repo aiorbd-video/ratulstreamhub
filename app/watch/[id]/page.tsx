@@ -32,57 +32,63 @@ export default function WatchPage() {
   }, [params.id]);
 
   useEffect(() => {
-    if (stream && stream.url && videoRef.current) {
-      const video = videoRef.current;
-      
+    if (!stream || !stream.url || !videoRef.current) return;
+
+    let hls: Hls;
+    const video = videoRef.current;
+    
+    // ১. Mixed Content এড়াতে http কে https এ রূপান্তর করার চেষ্টা
+    let currentUrl = stream.url.replace('http://', 'https://');
+    let isUsingProxy = false;
+
+    const initPlayer = (playUrl: string) => {
       if (Hls.isSupported()) {
-        const hls = new Hls({
+        if (hls) hls.destroy();
+
+        hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
         });
         
-        hls.loadSource(stream.url);
+        hls.loadSource(playUrl);
         hls.attachMedia(video);
         
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          // প্লে শুরু হলে এরর মেসেজ রিমুভ করে দেবে
           setErrorMsg(null);
-          video.play().catch(() => {
-            console.log("অটো-প্লে ব্রাউজার দ্বারা ব্লক করা হয়েছে। দয়া করে প্লে বাটনে ক্লিক করুন।");
-          });
+          video.play().catch(() => console.log("Play button click required."));
         });
 
-        // 🎯 স্মার্ট এরর ক্যাচার
         hls.on(Hls.Events.ERROR, (event, data) => {
           if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                setErrorMsg("🔴 CORS বা নেটওয়ার্ক এরর! ব্রাউজার এই লিংকটি সরাসরি ব্লক করছে। একটি প্রক্সি প্রয়োজন।");
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                setErrorMsg("🔴 মিডিয়া এরর! ভিডিও ডিকোড করতে সমস্যা হচ্ছে।");
-                hls.recoverMediaError();
-                break;
-              default:
-                setErrorMsg("🔴 স্ট্রিমিং সার্ভার সংযোগ বিচ্ছিন্ন করেছে।");
-                hls.destroy();
-                break;
+            // ২. যদি সরাসরি লিংকে নেটওয়ার্ক/CORS এরর খায়, তাহলে প্রক্সি দিয়ে রিট্রাই করবে
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !isUsingProxy) {
+              console.log("CORS Error detected. Retrying with Proxy...");
+              isUsingProxy = true;
+              const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(stream.url)}`;
+              initPlayer(proxyUrl);
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else {
+              setErrorMsg("🔴 স্ট্রিমিং সার্ভার এই মুহূর্তে ডাউন বা লিংকটি এক্সপায়ার হয়ে গেছে।");
+              hls.destroy();
             }
           }
         });
-
-        return () => hls.destroy();
       } 
       else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = stream.url;
+        video.src = playUrl;
         video.addEventListener('loadedmetadata', () => {
           video.play().catch(() => console.log("Play blocked"));
         });
-        video.addEventListener('error', () => {
-          setErrorMsg("🔴 ব্রাউজার এই ফরম্যাট বা লিংকটি সাপোর্ট করছে না (CORS Error)।");
-        });
       }
-    }
+    };
+
+    // প্লেয়ার চালু করা হলো
+    initPlayer(currentUrl);
+
+    return () => {
+      if (hls) hls.destroy();
+    };
   }, [stream]);
 
   return (
@@ -103,26 +109,23 @@ export default function WatchPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative">
+            <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative flex items-center justify-center">
               
-              {/* 🎯 যদি এরর খায়, স্ক্রিনের উপরে ভেসে উঠবে */}
+              {/* এরর মেসেজ বক্স */}
               {errorMsg && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 text-center">
-                  <div className="bg-red-950/80 border border-red-500/50 p-6 rounded-xl">
+                  <div className="bg-red-950/80 border border-red-500/50 p-6 rounded-xl max-w-md">
                     <p className="text-red-400 font-semibold">{errorMsg}</p>
-                    <p className="text-xs text-slate-400 mt-3 break-all bg-black/50 p-2 rounded">
-                      লিংক: {stream.url}
-                    </p>
                   </div>
                 </div>
               )}
 
+              {/* 🎯 ভাঙা পোস্টার সরিয়ে দেওয়া হয়েছে */}
               <video
                 ref={videoRef}
                 controls
+                autoPlay
                 className="w-full h-full"
-                // Loading poster পরিবর্তন করে সাধারণ কালো রাখা হলো
-                poster="https://placehold.co/1280x720/000000/000000"
               />
             </div>
 
