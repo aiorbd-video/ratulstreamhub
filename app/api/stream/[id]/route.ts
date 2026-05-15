@@ -2,15 +2,14 @@
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 
-// 🎯 Next.js 15/16 এর নতুন নিয়ম অনুযায়ী params কে Promise হিসেবে দেওয়া হলো
+export const dynamic = 'force-dynamic'; // 🎯 Vercel কে বলে দেওয়া হলো যেন ক্যাশ না করে
+
 export async function GET(
     request: Request, 
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        // 🎯 params কে await করে id বের করে নিতে হবে
         const resolvedParams = await params; 
-        
         const client = await clientPromise;
         const db = client.db("all_in_one_reborn_db");
         
