@@ -11,9 +11,9 @@ export default function WatchPage() {
   const artRef = useRef<HTMLDivElement>(null);
   const [stream, setStream] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [streamFailed, setStreamFailed] = useState(false); // 🎯 ফেইল হওয়ার স্টেট
+  const [streamFailed, setStreamFailed] = useState(false);
 
-  // আপনার টেলিগ্রাম বটের ইউজারনেম (এখানে আপনার বটের আসল ইউজারনেম দিন)
+  // আপনার টেলিগ্রাম বটের ইউজারনেম
   const BOT_USERNAME = "YourBotUsername"; 
 
   useEffect(() => {
@@ -25,7 +25,6 @@ export default function WatchPage() {
         const data = await res.json();
         if (data.success) {
           setStream(data.stream);
-          console.log("✅ Stream Data:", data.stream);
         }
       } catch (error) {
         console.error("Error fetching stream:", error);
@@ -45,7 +44,7 @@ export default function WatchPage() {
       art = new Artplayer({
         container: artRef.current!,
         url: stream.stream_url,
-        title: stream.title,
+        // 🎯 title লাইনটি মুছে দেওয়া হয়েছে কারণ টাইপস্ক্রিপ্ট এটি সাপোর্ট করে না
         poster: 'https://placehold.co/1280x720/000000/000000',
         volume: 0.8,
         isLive: true,
@@ -56,20 +55,17 @@ export default function WatchPage() {
         autoMini: true,
         setting: true,
         fullscreen: true,
-        theme: '#ef4444', // Red theme
+        theme: '#ef4444',
         customType: {
           m3u8: function (video, url, artInstance) {
             if (Hls.isSupported()) {
               const hls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
-                // 🎯 ম্যাজিক: ডেটাবেস থেকে পাওয়া হেডারগুলো এখানে পুশ করা হচ্ছে
                 xhrSetup: function (xhr, url) {
                   if (stream.referer) {
-                    // কিছু ব্রাউজার সরাসরি Referer সেট করতে দেয় না প্রক্সি ছাড়া
                     xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
                   }
-                  // কাস্টম প্রক্সি ব্যবহার করলে এই হেডারগুলো প্রক্সিতে পাস করা যায়
                   if (stream.user_agent) {
                     xhr.setRequestHeader('X-Custom-User-Agent', stream.user_agent);
                   }
@@ -86,7 +82,7 @@ export default function WatchPage() {
                 if (data.fatal) {
                   if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                     console.log("Fatal Network Error, triggering fallback...");
-                    setStreamFailed(true); // 🎯 ফেইল করলে বট ফলব্যাক চালু হবে
+                    setStreamFailed(true);
                     artInstance.destroy();
                   } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                     hls.recoverMediaError();
@@ -136,7 +132,6 @@ export default function WatchPage() {
         ) : (
           <div className="flex flex-col gap-6">
             
-            {/* 🎯 স্মার্ট ফলব্যাক: ভিডিও চললে Artplayer দেখাবে, ফেইল করলে বট লিংক দেখাবে */}
             {!streamFailed ? (
               <div 
                 ref={artRef} 
