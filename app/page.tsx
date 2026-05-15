@@ -1,64 +1,126 @@
-import Image from "next/image";
+// ফাইল পাথ: app/page.tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+
+interface Stream {
+  _id: string;
+  title: string;
+  group: string;
+  logo?: string;
+  short_id: string;
+}
 
 export default function Home() {
+  const [streams, setStreams] = useState<Stream[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    async function fetchStreams() {
+      try {
+        const res = await fetch('/api/streams');
+        const data = await res.json();
+        if (data.success) {
+          setStreams(data.streams);
+        }
+      } catch (error) {
+        console.error('Failed to fetch streams:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchStreams();
+  }, []);
+
+  // সার্চ ফিল্টার
+  const filteredStreams = streams.filter((stream) =>
+    stream.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    stream.group.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen bg-slate-950 text-white font-sans">
+      {/* হেডার / নেভিগেশন বার */}
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <h1 className="text-2xl font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-wider">
+            Ratul Stream Hub
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+          <div className="w-full sm:w-72">
+            <input
+              type="text"
+              placeholder="🔍 চ্যানেল বা খেলা খুঁজুন..."
+              className="w-full px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:border-red-500 transition-all text-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </div>
         </div>
+      </header>
+
+      {/* মেইন কন্টেন্ট */}
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        {loading ? (
+          /* লোডিং অ্যানিমেশন */
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-slate-400 animate-pulse">লাইভ স্ট্রিমগুলো লোড হচ্ছে...</p>
+          </div>
+        ) : filteredStreams.length === 0 ? (
+          /* ডেটা না থাকলে */
+          <div className="text-center py-20">
+            <p className="text-xl text-slate-400 font-medium">🔴 এই মুহূর্তে কোনো লাইভ স্ট্রিম সচল নেই।</p>
+            <p className="text-sm text-slate-500 mt-2">পরবর্তী খেলার আপডেটের জন্য অপেক্ষা করুন।</p>
+          </div>
+        ) : (
+          /* স্ট্রিম গ্রিড */
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+            {filteredStreams.map((stream) => (
+              <div
+                key={stream._id}
+                className="group bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden hover:border-red-500/50 hover:shadow-lg hover:shadow-red-500/5 transition-all duration-300 flex flex-col"
+              >
+                {/* চ্যানেল লোগো / থাম্বনেইল */}
+                <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
+                  {stream.logo && stream.logo.startsWith('http') ? (
+                    <img
+                      src={stream.logo}
+                      alt={stream.title}
+                      className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="text-4xl">📺</span>
+                  )}
+                  <span className="absolute top-2 left-2 bg-red-600 text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider animate-pulse shadow">
+                    LIVE
+                  </span>
+                </div>
+
+                {/* চ্যানেল ডিটেইলস */}
+                <div className="p-4 flex flex-col flex-grow justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wide block mb-1">
+                      {stream.group}
+                    </span>
+                    <h3 className="font-semibold text-sm line-clamp-2 text-slate-200 group-hover:text-white transition-colors">
+                      {stream.title}
+                    </h3>
+                  </div>
+                  
+                  {/* দেখার বাটন */}
+                  <a
+                    href={`/watch/${stream.short_id}`}
+                    className="w-full text-center bg-slate-850 hover:bg-gradient-to-r hover:from-red-600 hover:to-orange-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all duration-300 border border-slate-700 group-hover:border-transparent"
+                  >
+                    📺 সরাসরি দেখুন
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </main>
     </div>
   );
