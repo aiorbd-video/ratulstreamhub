@@ -33,7 +33,6 @@ export default function Home() {
     fetchStreams();
   }, []);
 
-  // সার্চ ফিল্টার
   const filteredStreams = streams.filter((stream) =>
     stream.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     stream.group.toLowerCase().includes(searchTerm.toLowerCase())
@@ -41,7 +40,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans">
-      {/* হেডার / নেভিগেশন বার */}
       <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <h1 className="text-2xl font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-wider">
@@ -59,29 +57,24 @@ export default function Home() {
         </div>
       </header>
 
-      {/* মেইন কন্টেন্ট */}
       <main className="max-w-7xl mx-auto px-4 py-8">
         {loading ? (
-          /* লোডিং অ্যানিমেশন */
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
             <p className="text-slate-400 animate-pulse">লাইভ স্ট্রিমগুলো লোড হচ্ছে...</p>
           </div>
         ) : filteredStreams.length === 0 ? (
-          /* ডেটা না থাকলে */
           <div className="text-center py-20">
             <p className="text-xl text-slate-400 font-medium">🔴 এই মুহূর্তে কোনো লাইভ স্ট্রিম সচল নেই।</p>
             <p className="text-sm text-slate-500 mt-2">পরবর্তী খেলার আপডেটের জন্য অপেক্ষা করুন।</p>
           </div>
         ) : (
-          /* স্ট্রিম গ্রিড */
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
             {filteredStreams.map((stream) => (
               <div
                 key={stream._id}
                 className="group bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden hover:border-red-500/50 hover:shadow-lg hover:shadow-red-500/5 transition-all duration-300 flex flex-col"
               >
-                {/* চ্যানেল লোগো / থাম্বনেইল */}
                 <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                   {stream.logo && stream.logo.startsWith('http') ? (
                     <img
@@ -89,6 +82,11 @@ export default function Home() {
                       alt={stream.title}
                       className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"
+                      referrerPolicy="no-referrer" /* 🎯 সিকিউরিটি বাইপাস ট্রিক */
+                      onError={(e) => {
+                        /* 🎯 যদি ছবি সত্যিই ব্লক থাকে, তবে ভাঙা ছবির বদলে এই ডিফল্ট ছবি দেখাবে */
+                        e.currentTarget.src = "https://placehold.co/600x400/0f172a/ef4444?text=LIVE+TV";
+                      }}
                     />
                   ) : (
                     <span className="text-4xl">📺</span>
@@ -98,7 +96,6 @@ export default function Home() {
                   </span>
                 </div>
 
-                {/* চ্যানেল ডিটেইলস */}
                 <div className="p-4 flex flex-col flex-grow justify-between gap-3">
                   <div>
                     <span className="text-[11px] font-bold text-red-400 uppercase tracking-wide block mb-1">
@@ -109,7 +106,6 @@ export default function Home() {
                     </h3>
                   </div>
                   
-                  {/* দেখার বাটন */}
                   <a
                     href={`/watch/${stream.short_id}`}
                     className="w-full text-center bg-slate-850 hover:bg-gradient-to-r hover:from-red-600 hover:to-orange-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all duration-300 border border-slate-700 group-hover:border-transparent"
