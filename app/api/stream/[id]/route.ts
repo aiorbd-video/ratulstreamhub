@@ -1,6 +1,6 @@
 // ফাইল পাথ: app/api/stream/[id]/route.ts
 import { NextResponse } from 'next/server';
-import clientPromise from '../../../../../lib/mongodb'; // পাথটি চেক করে নেবেন
+import clientPromise from '../../../../lib/mongodb'; // পাথটি চেক করে নেবেন
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
     try {
