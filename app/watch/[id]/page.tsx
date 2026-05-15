@@ -14,7 +14,7 @@ export default function WatchPage() {
   const [streamFailed, setStreamFailed] = useState(false);
 
   // আপনার টেলিগ্রাম বটের ইউজারনেম
-  const BOT_USERNAME = "YourBotUsername"; 
+  const BOT_USERNAME = "ratulnotific_bot"; 
 
   useEffect(() => {
     if (!params.id) return;
@@ -147,7 +147,7 @@ export default function WatchPage() {
                   সার্ভার সিকিউরিটির কারণে এই ভিডিওটি সরাসরি ওয়েবসাইটে ব্লক করা হয়েছে। দয়া করে আমাদের টেলিগ্রাম বট থেকে সরাসরি লিংকটি সংগ্রহ করুন।
                 </p>
                 <a 
-                  href={`https://t.me/${ratulnotific_bot}`} 
+                  href={`https://t.me/${BOT_USERNAME}`} 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-3 px-8 rounded-xl transition-all duration-300 flex items-center gap-2 shadow-lg shadow-blue-500/25"
