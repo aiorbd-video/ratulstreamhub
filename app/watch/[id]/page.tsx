@@ -21,6 +21,8 @@ export default function WatchPage() {
         const data = await res.json();
         if (data.success) {
           setStream(data.stream);
+          // 🎯 কনসোলেও লিংকটি প্রিন্ট করে দিচ্ছি চেক করার জন্য
+          console.log("✅ ডাটাবেস থেকে পাওয়া লিংক:", data.stream.url);
         }
       } catch (error) {
         console.error("Error fetching stream:", error);
@@ -37,7 +39,6 @@ export default function WatchPage() {
     let hls: Hls;
     const video = videoRef.current;
     
-    // ১. Mixed Content এড়াতে http কে https এ রূপান্তর করার চেষ্টা
     let currentUrl = stream.url.replace('http://', 'https://');
     let isUsingProxy = false;
 
@@ -60,7 +61,6 @@ export default function WatchPage() {
 
         hls.on(Hls.Events.ERROR, (event, data) => {
           if (data.fatal) {
-            // ২. যদি সরাসরি লিংকে নেটওয়ার্ক/CORS এরর খায়, তাহলে প্রক্সি দিয়ে রিট্রাই করবে
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !isUsingProxy) {
               console.log("CORS Error detected. Retrying with Proxy...");
               isUsingProxy = true;
@@ -69,7 +69,7 @@ export default function WatchPage() {
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
               hls.recoverMediaError();
             } else {
-              setErrorMsg("🔴 স্ট্রিমিং সার্ভার এই মুহূর্তে ডাউন বা লিংকটি এক্সপায়ার হয়ে গেছে।");
+              setErrorMsg("🔴 সার্ভার ডাউন বা লিংকটি ব্লক করা হয়েছে।");
               hls.destroy();
             }
           }
@@ -83,7 +83,6 @@ export default function WatchPage() {
       }
     };
 
-    // প্লেয়ার চালু করা হলো
     initPlayer(currentUrl);
 
     return () => {
@@ -111,7 +110,6 @@ export default function WatchPage() {
           <div className="flex flex-col gap-6">
             <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative flex items-center justify-center">
               
-              {/* এরর মেসেজ বক্স */}
               {errorMsg && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 text-center">
                   <div className="bg-red-950/80 border border-red-500/50 p-6 rounded-xl max-w-md">
@@ -120,7 +118,6 @@ export default function WatchPage() {
                 </div>
               )}
 
-              {/* 🎯 ভাঙা পোস্টার সরিয়ে দেওয়া হয়েছে */}
               <video
                 ref={videoRef}
                 controls
@@ -136,6 +133,15 @@ export default function WatchPage() {
               <h1 className="text-2xl md:text-3xl font-bold text-slate-100">
                 {stream.title}
               </h1>
+              
+              {/* 🎯 এই অংশটি লিংকটি স্ক্রিনে দেখাবে */}
+              <div className="mt-4 p-4 bg-black/50 rounded-xl border border-slate-800/50">
+                <p className="text-xs text-slate-400 font-mono break-all">
+                  <span className="text-red-500 font-bold mr-2">🔗 Stream Link:</span>
+                  {stream.url ? stream.url : "লিংক পাওয়া যায়নি!"}
+                </p>
+              </div>
+
             </div>
           </div>
         )}
