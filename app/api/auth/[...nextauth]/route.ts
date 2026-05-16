@@ -1,7 +1,9 @@
+// ফাইল পাথ: app/api/auth/[...nextauth]/route.ts
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import clientPromise from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
+import { ObjectId } from "mongodb"; // 🎯 ObjectId ইমপোর্ট করা হলো
 
 const handler = NextAuth({
   providers: [
@@ -19,19 +21,16 @@ const handler = NextAuth({
         const client = await clientPromise;
         const db = client.db("all_in_one_reborn_db");
 
-        // ডাটাবেস থেকে ইউজার খোঁজা
         const user = await db.collection("web_users").findOne({ phone: credentials.phone });
         if (!user) {
           throw new Error("এই নাম্বারে কোনো অ্যাকাউন্ট পাওয়া যায়নি!");
         }
 
-        // পাসওয়ার্ড মেলানো
         const isPasswordCorrect = await bcrypt.compare(credentials.password, user.password);
         if (!isPasswordCorrect) {
           throw new Error("পাসওয়ার্ড ভুল হয়েছে!");
         }
 
-        // লগিন সফল হলে ইউজারের এই ডাটাগুলো সেশনে সেভ থাকবে
         return {
           id: user._id.toString(),
           name: user.name,
@@ -49,8 +48,22 @@ const handler = NextAuth({
       if (user) {
         token.id = user.id;
         token.phone = (user as any).phone;
-        token.isPremium = (user as any).isPremium;
       }
+      
+      // 🎯 ম্যাজিক ফিক্স: পেজ রিফ্রেশ করলে কুকি রিড করার পাশাপাশি ডাটাবেস থেকে একদম লাইভ স্ট্যাটাস তুলে আনবে
+      if (token.id) {
+        try {
+          const client = await clientPromise;
+          const db = client.db("all_in_one_reborn_db");
+          const dbUser = await db.collection("web_users").findOne({ _id: new ObjectId(token.id as string) });
+          if (dbUser) {
+            token.isPremium = dbUser.isPremium; // ডাটাবেসের তাজা ডাটা টোকেনে সেট হলো
+          }
+        } catch (error) {
+          console.error("Error fetching user status in JWT:", error);
+        }
+      }
+      
       return token;
     },
     async session({ session, token }) {
@@ -61,7 +74,11 @@ const handler = NextAuth({
       }
       return session;
     }
-  }
+  },
+  pages: {
+    signIn: '/login',
+  },
+  secret: process.env.NEXTAUTH_SECRET,
 });
 
 export { handler as GET, handler as POST };
