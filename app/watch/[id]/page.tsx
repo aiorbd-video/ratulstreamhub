@@ -167,12 +167,7 @@ export default function WatchPage() {
                 {stream.title}
               </h1>
               
-              <div className="mt-4 p-4 bg-black/50 rounded-xl border border-slate-800/50">
-                <p className="text-xs text-slate-400 font-mono break-all">
-                  <span className="text-red-500 font-bold mr-2">🔗 Stream Link:</span>
-                  {stream.stream_url ? stream.stream_url : "লিংক পাওয়া যায়নি!"}
-                </p>
-              </div>
+              
             </div>
           </div>
         )}
