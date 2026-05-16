@@ -2,6 +2,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import AdBanner from './components/AdBanner';
+import NativeBanner from './components/NativeBanner';
 
 interface Stream {
   _id: string;
@@ -95,9 +97,9 @@ export default function Home() {
 
         <main className="max-w-[1600px] mx-auto px-4 py-8">
           
-          {/* 💰 Adsterra Top Banner Slot */}
-          <div className="w-full h-[60px] md:h-[90px] bg-slate-900/80 border border-slate-800 rounded-xl mb-8 flex items-center justify-center text-slate-500 text-sm font-bold tracking-widest uppercase">
-            Adsterra Banner Space
+          {/* 💰 Adsterra Top Banner Slot (Native Banner) */}
+          <div className="w-full flex items-center justify-center mb-8">
+            <NativeBanner />
           </div>
 
           {loading ? (
@@ -110,7 +112,6 @@ export default function Home() {
               <p className="text-xl text-slate-400 font-medium">🔴 এই মুহূর্তে কোনো লাইভ স্ট্রিম সচল নেই।</p>
             </div>
           ) : (
-            /* 🎯 TV, Desktop, Tablet ও Mobile এর জন্য ডাইনামিক গ্রিড */
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4 md:gap-6">
               {filteredStreams.map((stream) => (
                 <div
@@ -119,7 +120,7 @@ export default function Home() {
                 >
                   <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                     {stream.logo && stream.logo.startsWith('http') ? (
-                      /* 🎯 গ্লোবাল ইমেজ প্রক্সি দিয়ে CORS ব্লক বাইপাস করা হয়েছে */
+                      /* 🎯 গ্লোবাল ইমেজ প্রক্সি */
                       <img
                         src={`https://wsrv.nl/?url=${encodeURIComponent(stream.logo)}&w=400&h=225&fit=contain`}
                         alt={stream.title}
@@ -160,9 +161,9 @@ export default function Home() {
             </div>
           )}
 
-          {/* 💰 Adsterra Bottom Banner Slot */}
-          <div className="w-full h-[60px] md:h-[90px] bg-slate-900/80 border border-slate-800 rounded-xl mt-8 flex items-center justify-center text-slate-500 text-sm font-bold tracking-widest uppercase">
-            Adsterra Banner Space
+          {/* 💰 Adsterra Bottom Banner Slot (300x250 Banner) */}
+          <div className="w-full flex items-center justify-center mt-8">
+            <AdBanner />
           </div>
 
         </main>
