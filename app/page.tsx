@@ -2,6 +2,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession, signOut } from 'next-auth/react';
+import Link from 'next/link';
 import AdBanner from './components/AdBanner';
 import NativeBanner from './components/NativeBanner';
 
@@ -14,6 +16,10 @@ interface Stream {
 }
 
 export default function Home() {
+  const { data: session } = useSession();
+  // 🎯 ইউজারের প্রিমিয়াম স্ট্যাটাস চেক করা হচ্ছে
+  const isPremium = (session?.user as any)?.isPremium === true;
+
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,7 +56,6 @@ export default function Home() {
               logo: finalLogo
             };
           });
-
           setStreams(cleanedStreams);
         }
       } catch (error) {
@@ -70,7 +75,6 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans relative overflow-hidden">
       
-      {/* 🌟 Aurora Motion Background */}
       <div className="fixed inset-0 w-full h-full pointer-events-none z-0">
         <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] rounded-full bg-red-600/20 blur-[120px] animate-blob mix-blend-screen"></div>
         <div className="absolute top-[20%] right-[-10%] w-[35vw] h-[35vw] rounded-full bg-orange-600/20 blur-[120px] animate-blob animation-delay-2000 mix-blend-screen"></div>
@@ -79,11 +83,13 @@ export default function Home() {
 
       <div className="relative z-10">
         <header className="border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
-          <div className="max-w-[1600px] mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <h1 className="text-2xl font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-wider">
+          <div className="max-w-[1600px] mx-auto px-4 py-4 flex flex-col md:flex-row items-center justify-between gap-4">
+            
+            <h1 className="text-2xl font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-wider text-center md:text-left">
               All In One Reborn
             </h1>
-            <div className="w-full sm:w-80">
+            
+            <div className="w-full md:w-80 flex-grow max-w-md mx-auto md:mx-0">
               <input
                 type="text"
                 placeholder="🔍 চ্যানেল বা খেলা খুঁজুন..."
@@ -92,15 +98,39 @@ export default function Home() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
+
+            {/* 🎯 লগিন ও প্রোফাইল সেকশন */}
+            <div className="flex items-center gap-3">
+              {session ? (
+                <div className="flex items-center gap-3 bg-slate-800/50 px-4 py-2 rounded-xl border border-slate-700/50">
+                  <div className="text-right">
+                    <p className="text-sm font-bold">{session.user?.name}</p>
+                    {isPremium ? (
+                      <span className="text-[10px] bg-gradient-to-r from-yellow-400 to-yellow-600 text-black px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Premium VIP</span>
+                    ) : (
+                      <Link href="/premium" className="text-[10px] bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/50 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider transition-colors cursor-pointer">Upgrade to Premium</Link>
+                    )}
+                  </div>
+                  <button onClick={() => signOut()} className="text-xs bg-slate-700 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg transition-colors font-medium ml-2">লগআউট</button>
+                </div>
+              ) : (
+                <Link href="/login" className="bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 text-white font-bold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-red-500/25 whitespace-nowrap">
+                  লগিন করুন
+                </Link>
+              )}
+            </div>
+
           </div>
         </header>
 
         <main className="max-w-[1600px] mx-auto px-4 py-8">
           
-          {/* 💰 Adsterra Top Banner Slot (Native Banner) */}
-          <div className="w-full flex items-center justify-center mb-8">
-            <NativeBanner />
-          </div>
+          {/* 💰 অ্যাড শুধু ফ্রি ইউজারদের দেখাবে */}
+          {!isPremium && (
+            <div className="w-full flex items-center justify-center mb-8">
+              <NativeBanner />
+            </div>
+          )}
 
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -120,7 +150,6 @@ export default function Home() {
                 >
                   <div className="aspect-video w-full bg-slate-950 relative overflow-hidden flex items-center justify-center border-b border-slate-800">
                     {stream.logo && stream.logo.startsWith('http') ? (
-                      /* 🎯 গ্লোবাল ইমেজ প্রক্সি */
                       <img
                         src={`https://wsrv.nl/?url=${encodeURIComponent(stream.logo)}&w=400&h=225&fit=contain`}
                         alt={stream.title}
@@ -161,10 +190,12 @@ export default function Home() {
             </div>
           )}
 
-          {/* 💰 Adsterra Bottom Banner Slot (300x250 Banner) */}
-          <div className="w-full flex items-center justify-center mt-8">
-            <AdBanner />
-          </div>
+          {/* 💰 অ্যাড শুধু ফ্রি ইউজারদের দেখাবে */}
+          {!isPremium && (
+            <div className="w-full flex items-center justify-center mt-8">
+              <AdBanner />
+            </div>
+          )}
 
         </main>
       </div>
