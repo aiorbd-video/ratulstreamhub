@@ -1,5 +1,5 @@
 // ফাইল পাথ: app/api/playlist/[id]/route.ts
-import clientPromise from '@/lib/mongodb';
+import clientPromise from '../../../../lib/mongodb';
 import { ObjectId } from 'mongodb';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +32,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       });
     }
 
-    // ৩. ইউজারের মেয়াদ থাকলে ডাটাবেস থেকে সব স্ট্রিম নিয়ে আসা
+    // ৩. ইউজারের মেয়াদ থাকলে ডাটাবেস থেকে সব স্ট্রিম নিয়ে আসা (বট থেকে আসা ডেটা)
     const streams = await db.collection("posted_streams").find({}).toArray();
 
     // ৪. ডাইনামিক M3U ফাইল তৈরি করা
@@ -61,7 +61,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     });
 
-    // ৫. প্লেলিস্ট ফাইল হিসেবে ইউজারের কাছে পাঠানো
+    // ৫. ডাটাবেস থেকে মার্জ করা এক্সট্রা প্রিমিয়াম চ্যানেলগুলো (অ্যাডমিন প্যানেল থেকে দেওয়া) নিয়ে আসা
+    const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
+    if (mergedM3uDoc && mergedM3uDoc.content) {
+      m3uContent += "\n" + mergedM3uDoc.content;
+    }
+
+    // ৬. প্লেলিস্ট ফাইল হিসেবে ইউজারের কাছে পাঠানো
     return new Response(m3uContent, {
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
