@@ -1,38 +1,71 @@
-import NextAuth from 'next-auth'
-import type { NextAuthOptions } from 'next-auth'
-import CredentialsProvider from 'next-auth/providers/credentials'
+import NextAuth from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import clientPromise from "../../../../../lib/mongodb";
+import bcrypt from "bcryptjs";
 
-export const authOptions: NextAuthOptions = {
+const handler = NextAuth({
   providers: [
     CredentialsProvider({
-      name: 'Credentials',
+      name: "Credentials",
       credentials: {
-        username: { label: "Username", type: "text" },
+        phone: { label: "Phone", type: "text", placeholder: "017..." },
         password: { label: "Password", type: "password" }
       },
-      async authorize(credentials, req) {
-        // Add your own authentication logic here
-        // For example, you can connect to a database to verify credentials
-        const user = { id: "1", name: 'J Smith', email: 'jsmith@example.com' }
-
-        if (user) {
-          // Any object returned will be saved in `user` property of the JWT
-          return user
-        } else {
-          // If you return null then an error will be displayed advising the user to check their details.
-          return null
-
-          // You can also Reject this callback with an Error thus the user will be sent to the error page with the error message as a query parameter
+      async authorize(credentials) {
+        if (!credentials?.phone || !credentials?.password) {
+          throw new Error("নাম্বার এবং পাসওয়ার্ড দিন!");
         }
+
+        const client = await clientPromise;
+        const db = client.db("all_in_one_reborn_db");
+
+        // ডাটাবেস থেকে ইউজার খোঁজা
+        const user = await db.collection("web_users").findOne({ phone: credentials.phone });
+        if (!user) {
+          throw new Error("এই নাম্বারে কোনো অ্যাকাউন্ট পাওয়া যায়নি!");
+        }
+
+        // পাসওয়ার্ড মেলানো
+        const isPasswordCorrect = await bcrypt.compare(credentials.password, user.password);
+        if (!isPasswordCorrect) {
+          throw new Error("পাসওয়ার্ড ভুল হয়েছে!");
+        }
+
+        // লগিন সফল হলে ইউজারের এই ডাটাগুলো সেশনে সেভ থাকবে
+        return {
+          id: user._id.toString(),
+          name: user.name,
+          phone: user.phone,
+          isPremium: user.isPremium,
+        } as any;
       }
     })
   ],
-  secret: process.env.NEXTAUTH_SECRET,
+  session: {
+    strategy: "jwt",
+  },
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.phone = (user as any).phone;
+        token.isPremium = (user as any).isPremium;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as any).id = token.id;
+        (session.user as any).phone = token.phone;
+        (session.user as any).isPremium = token.isPremium;
+      }
+      return session;
+    }
+  },
   pages: {
-    signIn: '/auth/signin',
-  }
-}
+    signIn: '/login', // আমাদের কাস্টম লগিন পেজ (পরে বানাবো)
+  },
+  secret: process.env.NEXTAUTH_SECRET, // সিকিউরিটি কী (Key)
+});
 
-const handler = NextAuth(authOptions)
-
-export { handler as GET, handler as POST }
+export { handler as GET, handler as POST };
