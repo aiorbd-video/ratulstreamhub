@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from 'next/script';
 import "./globals.css";
+import AuthProvider from './components/AuthProvider';
 
 // 🌟 প্রিমিয়াম ফন্ট সেটআপ
 const geistSans = Geist({
