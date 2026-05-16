@@ -75,6 +75,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans relative overflow-hidden">
       
+      {/* 🌟 Aurora Motion Background */}
       <div className="fixed inset-0 w-full h-full pointer-events-none z-0">
         <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] rounded-full bg-red-600/20 blur-[120px] animate-blob mix-blend-screen"></div>
         <div className="absolute top-[20%] right-[-10%] w-[35vw] h-[35vw] rounded-full bg-orange-600/20 blur-[120px] animate-blob animation-delay-2000 mix-blend-screen"></div>
@@ -103,14 +104,31 @@ export default function Home() {
             <div className="flex items-center gap-3">
               {session ? (
                 <div className="flex items-center gap-3 bg-slate-800/50 px-4 py-2 rounded-xl border border-slate-700/50">
-                  <div className="text-right">
+                  
+                  {/* 🎯 প্রোফাইল, প্রিমিয়াম ব্যাজ এবং M3U বাটন */}
+                  <div className="text-right flex flex-col items-end gap-1">
                     <p className="text-sm font-bold">{session.user?.name}</p>
                     {isPremium ? (
-                      <span className="text-[10px] bg-gradient-to-r from-yellow-400 to-yellow-600 text-black px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Premium VIP</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] bg-gradient-to-r from-yellow-400 to-yellow-600 text-black px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Premium VIP</span>
+                        
+                        {/* 📋 M3U Copy Button */}
+                        <button 
+                          onClick={() => {
+                            const url = `${window.location.origin}/api/playlist/${(session.user as any).id}`;
+                            navigator.clipboard.writeText(url);
+                            alert("✅ আপনার পার্সোনাল M3U লিংক কপি হয়েছে! এটি যেকোনো IPTV অ্যাপে (Tivimate/Smarters) বসান।");
+                          }} 
+                          className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-md"
+                        >
+                          📋 M3U Link
+                        </button>
+                      </div>
                     ) : (
                       <Link href="/premium" className="text-[10px] bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/50 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider transition-colors cursor-pointer">Upgrade to Premium</Link>
                     )}
                   </div>
+
                   <button onClick={() => signOut()} className="text-xs bg-slate-700 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg transition-colors font-medium ml-2">লগআউট</button>
                 </div>
               ) : (
