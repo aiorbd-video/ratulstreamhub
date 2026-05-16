@@ -61,11 +61,7 @@ const handler = NextAuth({
       }
       return session;
     }
-  },
-  pages: {
-    signIn: '/login', // আমাদের কাস্টম লগিন পেজ (পরে বানাবো)
-  },
-  secret: process.env.NEXTAUTH_SECRET, // সিকিউরিটি কী (Key)
+  }
 });
 
 export { handler as GET, handler as POST };
