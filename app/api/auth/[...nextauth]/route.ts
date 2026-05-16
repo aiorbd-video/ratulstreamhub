@@ -1,6 +1,6 @@
 import NextAuth from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
-import clientPromise from "../../../../../lib/mongodb";
+import CredentialsProvider from "next-authprovidersoviders/credentials";
+import clientPromise from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 
 const handler = NextAuth({
