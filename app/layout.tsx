@@ -34,7 +34,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} antialiased`}
     >
       <body className="min-h-screen bg-slate-950 text-white font-sans flex flex-col">
-        
+        <AuthProvider>
         {/* মূল ওয়েবসাইট কন্টেন্ট */}
         {children}
 
@@ -49,7 +49,7 @@ export default function RootLayout({
           src="https://momrollback.com/0c/d5/88/0cd588cbd2e534cc84cf309218b813ee.js" 
           strategy="lazyOnload" 
         />
-        
+        </AuthProvider>
       </body>
     </html>
   );
