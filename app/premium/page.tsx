@@ -15,8 +15,8 @@ export default function PremiumPage() {
   const [message, setMessage] = useState('');
 
   // আপনার রিসিভার নাম্বারগুলো এখানে দিন
-  const BKASH_NUMBER = "017XXXXXXXX"; 
-  const NAGAD_NUMBER = "017XXXXXXXX";
+  const BKASH_NUMBER = "01910254667"; 
+  const NAGAD_NUMBER = "01910254667";
 
   if (status === "unauthenticated") {
     router.push('/login');
