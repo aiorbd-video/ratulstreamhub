@@ -25,7 +25,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       });
     }
 
-    // ওয়েবসাইটের বর্তমান ডোমেইন বের করা (যেমন: https://ratulstreamhub.vercel.app)
     const host = req.headers.get('host');
     const protocol = host?.includes('localhost') ? 'http' : 'https';
     const baseUrl = `${protocol}://${host}`;
@@ -34,13 +33,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 বট থেকে আসা স্ট্রিমগুলো প্রসেস ও মাস্কিং করা
     streams.forEach(stream => {
       let rawTitle = stream.title || "";
-      let logo = stream.logo || ""; // 🎯 ডাটাবেস থেকে সরাসরি লোগো নেওয়া হচ্ছে
-      let group = stream.group || "All In One Reborn VIP"; // 🎯 অরিজিনাল ক্যাটাগরি নেওয়া হচ্ছে
+      let logo = stream.logo || ""; 
+      let group = stream.group || "All In One Reborn VIP"; 
 
-      // ডাটাবেসে লোগো না থাকলে টাইটেল থেকে খুঁজবে
       if (!logo) {
         const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
         if (logoMatch) logo = logoMatch[1];
@@ -54,8 +51,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       const url = stream.stream_url;
 
       if (url) {
-        // 🔒 আসল লিংক এনকোড করা হচ্ছে (URL Safe Encoding সহ)
-        const encodedUrl = encodeURIComponent(Buffer.from(url).toString('base64'));
+        // 🎯 ফিক্স: বট থেকে আসা লিংকের স্পেস ক্লিন করা
+        const cleanUrl = url.replace(/[\r\n\s]+/g, "").trim();
+        const encodedUrl = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
         const secureUrl = `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encodedUrl}`;
         
         m3uContent += `#EXTINF:-1 tvg-logo="${logo}" group-title="${group}", ${cleanTitle}\n`;
@@ -63,12 +61,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     });
 
-    // 🎯 অ্যাডমিন প্যানেল থেকে সিংক করা বিশাল ফোল্ডারের লিংকগুলো মাস্কিং করা
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
-      // রেগুলার এক্সপ্রেশন দিয়ে সব http/https লিংক খুঁজে বের করে নিরাপদভাবে এনকোড করা হচ্ছে
       const secureMergedContent = mergedM3uDoc.content.replace(/^(https?:\/\/.*)$/gm, (match: string) => {
-        const encoded = encodeURIComponent(Buffer.from(match).toString('base64'));
+        // 🎯 ফিক্স: অ্যাডমিন প্যানেল থেকে আসা লিংকের হিডেন ক্যারেক্টার (\r) জোরপূর্বক ক্লিন করা
+        const cleanUrl = match.replace(/[\r\n\s]+/g, "").trim();
+        const encoded = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
         return `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encoded}`;
       });
       m3uContent += "\n" + secureMergedContent;
