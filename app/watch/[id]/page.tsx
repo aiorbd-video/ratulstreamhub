@@ -60,10 +60,9 @@ export default function WatchPage() {
       pip: true,
       autoMini: true,
       
-      // 🎯 Artplayer এর নেটিভ সেটিংস অন করা হলো
       setting: true,
-      playbackRate: true, // স্পিড কন্ট্রোল
-      aspectRatio: true,  // ভিডিও সাইজ কন্ট্রোল
+      playbackRate: true, 
+      aspectRatio: true,  
       
       fullscreen: true,
       fullscreenWeb: true,
@@ -79,18 +78,14 @@ export default function WatchPage() {
             hls.loadSource(url);
             hls.attachMedia(video);
             
-            // 🎯 ডাইনামিক কোয়ালিটি (Resolution) কন্ট্রোল যুক্ত করা
             hls.on(Hls.Events.MANIFEST_PARSED, function () {
-              // যদি স্ট্রিমে একাধিক কোয়ালিটি (যেমন: 480p, 720p) থাকে, তবেই অপশন দেখাবে
               if (hls.levels.length > 1) {
                 const qualityOptions = hls.levels.map((level, index) => ({
                   html: (level.height ? level.height + 'p' : 'Quality ' + (index + 1)),
                   level: index,
                 }));
-                // Auto অপশনটি সবার উপরে রাখা হলো
                 qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-                // সেটিংসে কোয়ালিটি চেঞ্জার যুক্ত করা
                 artInstance.setting.add({
                   name: 'quality',
                   width: 200,
@@ -101,8 +96,9 @@ export default function WatchPage() {
                     value: q.level,
                     default: q.level === -1
                   })),
-                  onSelect: function (item) {
-                    hls.currentLevel = item.value;
+                  // 🎯 ফিক্স: item: any দেওয়া হলো এবং Number() দিয়ে ভ্যালু কনভার্ট করা হলো
+                  onSelect: function (item: any) {
+                    hls.currentLevel = Number(item.value);
                     return item.html;
                   },
                 });
@@ -178,7 +174,6 @@ export default function WatchPage() {
             </div>
           )}
 
-          {/* 🎯 Artplayer মূল এলিমেন্ট */}
           {!errorMsg && <div ref={playerRef} className="w-full h-full"></div>}
         </div>
       </div>
