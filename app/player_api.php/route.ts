@@ -4,69 +4,76 @@ import clientPromise from '@/lib/mongodb';
 
 export const dynamic = 'force-dynamic';
 
-// 🎯 স্ট্রিং থেকে ডাইনামিক Numeric ID বানানোর ফাংশন (Xtream API এর জন্য Number ID লাগে)
 const generateId = (str: string) => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
   return Math.abs(hash);
 };
 
-export async function GET(req: Request) {
+// 🛡️ CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept",
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
+async function handleRequest(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const username = searchParams.get('username');
-    const password = searchParams.get('password'); // ইউজারের একাউন্টের পাসওয়ার্ড
-    const action = searchParams.get('action');
+    const url = new URL(req.url);
+    let username = url.searchParams.get('username');
+    let password = url.searchParams.get('password');
+    let action = url.searchParams.get('action');
+
+    // 🎯 ম্যাজিক ফিক্স ২: IPTV Smarters এর x-www-form-urlencoded ডাটা ১০০% সঠিকভাবে পার্স করা
+    if (req.method === 'POST') {
+      try {
+        const text = await req.text();
+        const params = new URLSearchParams(text);
+        if (params.get('username')) username = params.get('username');
+        if (params.get('password')) password = params.get('password');
+        if (params.get('action')) action = params.get('action');
+      } catch (e) {}
+    }
 
     if (!username || !password) {
-      return NextResponse.json({ user_info: { auth: 0 } });
+      return NextResponse.json({ user_info: { auth: 0 } }, { headers: corsHeaders });
     }
 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
-    // ১. ইউজার ভেরিফিকেশন (ফোন নাম্বার ও পাসওয়ার্ড দিয়ে)
-    const user = await db.collection("web_users").findOne({ phone: username, password: password });
+    const user = await db.collection("web_users").findOne({ phone: username });
     
-    if (!user) {
-      return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Details" } });
+    // ফোন নাম্বারকেই পাসওয়ার্ড হিসেবে কাজ করানোর লজিক
+    if (!user || (user.password ? user.password !== password : password !== username)) {
+      return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Details" } }, { headers: corsHeaders });
     }
 
     const now = new Date();
     const isExpired = !user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now);
     
     if (isExpired) {
-      return NextResponse.json({ user_info: { auth: 0, status: "Expired" } });
+      return NextResponse.json({ user_info: { auth: 0, status: "Expired" } }, { headers: corsHeaders });
     }
 
-    // 🛡️ ২. অ্যান্টি-শেয়ারিং (১ ডিভাইস লগিন লিমিট)
-    const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
-    const currentTime = now.getTime();
-    
-    // যদি অন্য কোনো IP থেকে রিকোয়েস্ট আসে এবং আগের ডিভাইসটি ১ মিনিটের মধ্যে অ্যাক্টিভ থাকে
-    if (user.activeIp && user.activeIp !== clientIp && (currentTime - (user.lastActiveTime || 0)) < 60000) {
-       return NextResponse.json({ user_info: { auth: 0, status: "Already watching on another device!" } });
-    }
-    
-    // আইপি এবং অ্যাক্টিভ টাইম আপডেট করা হলো
-    await db.collection("web_users").updateOne(
-      { _id: user._id }, 
-      { $set: { activeIp: clientIp, lastActiveTime: currentTime } }
-    );
+    // 🎯 ম্যাজিক ফিক্স ১: এখান থেকে IP Lock সরিয়ে দেওয়া হয়েছে। (আইপি লক শুধুমাত্র /live/... ফাইলে থাকবে, যাতে প্লেলিস্ট স্মুথলি লোড হয়)
 
-    // 🎯 ৩. Xtream Authentication Response
     if (!action) {
       return NextResponse.json({
         user_info: {
           username: user.phone,
-          password: user.password,
+          password: password,
           message: "Welcome to All In One Reborn VIP",
           auth: 1,
           status: "Active",
-          exp_date: user.premiumExpiry ? Math.floor(new Date(user.premiumExpiry).getTime() / 1000) : null,
+          exp_date: user.premiumExpiry ? Math.floor(new Date(user.premiumExpiry).getTime() / 1000) : "1999999999",
           is_trial: user.hasUsedTrial ? "0" : "1",
           active_cons: 1,
-          max_connections: 1 // ১ ডিভাইসের লিমিট
+          max_connections: 1
         },
         server_info: {
           url: "ratulstreamhub.vercel.app",
@@ -78,10 +85,9 @@ export async function GET(req: Request) {
           timestamp_now: Math.floor(Date.now() / 1000),
           time_now: new Date().toLocaleString(),
         }
-      });
+      }, { headers: corsHeaders });
     }
 
-    // 🎯 ৪. লাইভ টিভি ক্যাটাগরি (Groups) পাঠানো
     if (action === 'get_live_categories') {
       const streams = await db.collection("posted_streams").find({}).toArray();
       const categoriesMap = new Map();
@@ -91,7 +97,6 @@ export async function GET(req: Request) {
         categoriesMap.set(group, generateId(group));
       });
 
-      // অ্যাডমিন প্যানেলের M3U থেকে ক্যাটাগরি বের করা
       const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
       if (mergedM3uDoc && mergedM3uDoc.content) {
         const matches = mergedM3uDoc.content.matchAll(/group-title="([^"]+)"/g);
@@ -101,10 +106,9 @@ export async function GET(req: Request) {
       }
 
       const categories = Array.from(categoriesMap, ([name, id]) => ({ category_id: id.toString(), category_name: name, parent_id: 0 }));
-      return NextResponse.json(categories);
+      return NextResponse.json(categories, { headers: corsHeaders });
     }
 
-    // 🎯 ৫. লাইভ টিভি চ্যানেল (Streams) পাঠানো
     if (action === 'get_live_streams') {
       const streams = await db.collection("posted_streams").find({}).toArray();
       const liveStreams: any[] = [];
@@ -117,7 +121,7 @@ export async function GET(req: Request) {
           name: cleanTitle,
           stream_type: "live",
           stream_id: generateId(stream.stream_url),
-          stream_icon: stream.logo || "https://placehold.co/600x400/1e293b/ef4444?text=LIVE+TV",
+          stream_icon: stream.logo || "",
           epg_channel_id: null,
           added: "1",
           category_id: generateId(stream.group || "Live TV").toString(),
@@ -128,13 +132,12 @@ export async function GET(req: Request) {
         });
       });
 
-      // অ্যাডমিন প্যানেলের M3U চ্যানেল যুক্ত করা
       const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
       if (mergedM3uDoc && mergedM3uDoc.content) {
         const lines = mergedM3uDoc.content.split('\n');
         let currentTitle = "Premium TV";
         let currentGroup = "Premium VIP";
-        let currentLogo = "https://placehold.co/600x400/1e293b/ef4444?text=VIP+TV";
+        let currentLogo = "";
 
         for (let i = 0; i < lines.length; i++) {
           let line = lines[i].trim();
@@ -152,7 +155,7 @@ export async function GET(req: Request) {
               num: liveStreams.length + 1,
               name: currentTitle,
               stream_type: "live",
-              stream_id: generateId(line.split('|')[0]), // পাইপ হেডার বাদ দিয়ে আইডি তৈরি
+              stream_id: generateId(line.split('|')[0]), 
               stream_icon: currentLogo,
               epg_channel_id: null,
               added: "1",
@@ -165,13 +168,16 @@ export async function GET(req: Request) {
           }
         }
       }
-
-      return NextResponse.json(liveStreams);
+      return NextResponse.json(liveStreams, { headers: corsHeaders });
     }
 
-    return NextResponse.json([]);
+    // 🎯 ম্যাজিক ফিক্স ৩: মুভি বা সিরিজের রিকোয়েস্ট আসলে যেন প্লেয়ার ক্র্যাশ না করে, তার জন্য খালি Array পাঠানো হলো।
+    return NextResponse.json([], { headers: corsHeaders });
 
   } catch (error) {
-    return NextResponse.json({ user_info: { auth: 0, status: "Server Error" } }, { status: 500 });
+    return NextResponse.json({ user_info: { auth: 0, status: "Server Error" } }, { status: 500, headers: corsHeaders });
   }
 }
+
+export async function GET(req: Request) { return handleRequest(req); }
+export async function POST(req: Request) { return handleRequest(req); }
