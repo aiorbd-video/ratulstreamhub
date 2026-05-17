@@ -17,14 +17,20 @@ interface Stream {
 
 export default function Home() {
   const { data: session } = useSession();
-  // 🎯 ইউজারের প্রিমিয়াম স্ট্যাটাস চেক করা হচ্ছে
   const isPremium = (session?.user as any)?.isPremium === true;
 
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // 🎯 Xtream Codes পপআপ এবং হোস্ট ইউআরএল এর জন্য নতুন স্টেট (State)
+  const [showXcModal, setShowXcModal] = useState(false);
+  const [baseUrl, setBaseUrl] = useState('');
 
   useEffect(() => {
+    // ব্রাউজারের অরিজিনাল ডোমেইন সেট করা (Hydration Error এড়ানোর জন্য)
+    setBaseUrl(window.location.origin);
+
     async function fetchStreams() {
       try {
         const res = await fetch('/api/streams');
@@ -105,23 +111,18 @@ export default function Home() {
               {session ? (
                 <div className="flex items-center gap-3 bg-slate-800/50 px-4 py-2 rounded-xl border border-slate-700/50">
                   
-                  {/* 🎯 প্রোফাইল, প্রিমিয়াম ব্যাজ এবং M3U বাটন */}
                   <div className="text-right flex flex-col items-end gap-1">
                     <p className="text-sm font-bold">{session.user?.name}</p>
                     {isPremium ? (
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] bg-gradient-to-r from-yellow-400 to-yellow-600 text-black px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Premium VIP</span>
                         
-                        {/* 📋 M3U Copy Button */}
+                        {/* 🎯 নতুন এবং সহজ Xtream Codes লগিন ডিটেইলস বাটন */}
                         <button 
-                          onClick={() => {
-                            const url = `${window.location.origin}/api/playlist/${(session.user as any).id}`;
-                            navigator.clipboard.writeText(url);
-                            alert("✅ আপনার পার্সোনাল M3U লিংক কপি হয়েছে! এটি যেকোনো IPTV অ্যাপে (Tivimate/Smarters) বসান।");
-                          }} 
+                          onClick={() => setShowXcModal(true)} 
                           className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-md"
                         >
-                          📋 M3U Link
+                          🔐 Xtream Login
                         </button>
                       </div>
                     ) : (
@@ -143,7 +144,6 @@ export default function Home() {
 
         <main className="max-w-[1600px] mx-auto px-4 py-8">
           
-          {/* 💰 অ্যাড শুধু ফ্রি ইউজারদের দেখাবে */}
           {!isPremium && (
             <div className="w-full flex items-center justify-center mb-8">
               <NativeBanner />
@@ -208,7 +208,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* 💰 অ্যাড শুধু ফ্রি ইউজারদের দেখাবে */}
           {!isPremium && (
             <div className="w-full flex items-center justify-center mt-8">
               <AdBanner />
@@ -217,6 +216,59 @@ export default function Home() {
 
         </main>
       </div>
+
+      {/* 🎯 নতুন এবং সহজ Xtream Codes পপআপ বক্স (Modal) */}
+      {showXcModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 relative shadow-2xl animate-in fade-in zoom-in duration-200">
+            
+            <h3 className="text-xl font-black text-yellow-500 mb-2 flex items-center gap-2">
+              🔐 Xtream Codes VIP লগইন তথ্য
+            </h3>
+            <p className="text-xs text-slate-400 mb-5">
+              যেকোনো আইপিটিভি অ্যাপে (যেমন: TiviMate, IPTV Smarters Pro) নিচের তথ্যগুলো হুবহু বসিয়ে লগইন করুন।
+            </p>
+            
+            <div className="space-y-4">
+              {/* ১. হোস্ট ইউআরএল */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">১. Host / Portal URL</label>
+                <div className="flex gap-2">
+                  <input type="text" readOnly value={baseUrl} className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-xs font-mono text-white select-all outline-none" />
+                  <button onClick={() => { navigator.clipboard.writeText(baseUrl); alert("✅ Host URL কপি হয়েছে!"); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl text-xs font-bold transition-colors">Copy</button>
+                </div>
+              </div>
+
+              {/* ২. ইউজারনেম */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">২. Username (আপনার নাম্বার)</label>
+                <div className="flex gap-2">
+                  <input type="text" readOnly value={(session?.user as any)?.phone || ""} className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-xs font-mono text-white select-all outline-none" />
+                  <button onClick={() => { navigator.clipboard.writeText((session?.user as any)?.phone || ""); alert("✅ Username কপি হয়েছে!"); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl text-xs font-bold transition-colors">Copy</button>
+                </div>
+              </div>
+
+              {/* ৩. পাসওয়ার্ড */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">৩. Password</label>
+                <div className="flex gap-2">
+                  <input type="text" readOnly value={(session?.user as any)?.password || (session?.user as any)?.phone || ""} className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-xs font-mono text-yellow-400 select-all outline-none" />
+                  <button onClick={() => { navigator.clipboard.writeText((session?.user as any)?.password || (session?.user as any)?.phone || ""); alert("✅ Password কপি হয়েছে!"); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl text-xs font-bold transition-colors">Copy</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl text-[11px] text-blue-400 leading-relaxed">
+              ⚠️ <b>সতর্কতা:</b> এই লগইন ডিটেইলসটি শুধুমাত্র আপনার ১টি ডিভাইসের জন্য। একই সাথে একাধিক ডিভাইসে ব্যবহার করলে আপনার অ্যাকাউন্ট স্বয়ংক্রিয়ভাবে লক হয়ে যাবে।
+            </div>
+
+            <button onClick={() => setShowXcModal(false)} className="mt-5 w-full bg-slate-800 hover:bg-red-600 text-white font-bold py-3 rounded-xl text-sm transition-all">
+              বন্ধ করুন
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
