@@ -11,7 +11,7 @@ export default function AdminPanel() {
   const router = useRouter();
 
   // 👑 সিকিউরিটি লক: এখানে আপনার নিজের মোবাইল নাম্বারটি দিন (যিনি সুপার অ্যাডমিন হবেন)
-  const ADMIN_NUMBERS = ["017XXXXXXXX"]; // উদাহরণ: ["01712345678", "01987654321"]
+  const ADMIN_NUMBERS = ["01910254667"]; // উদাহরণ: ["01712345678", "01987654321"]
 
   const [activeTab, setActiveTab] = useState('payments'); 
   const [requests, setRequests] = useState<any[]>([]);
