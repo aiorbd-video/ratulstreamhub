@@ -3,10 +3,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState('payments'); // Tab State
-  
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  // 👑 সিকিউরিটি লক: এখানে আপনার নিজের মোবাইল নাম্বারটি দিন (যিনি সুপার অ্যাডমিন হবেন)
+  const ADMIN_NUMBERS = ["017XXXXXXXX"]; // উদাহরণ: ["01712345678", "01987654321"]
+
+  const [activeTab, setActiveTab] = useState('payments'); 
   const [requests, setRequests] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +36,7 @@ export default function AdminPanel() {
 
       if (reqData.success) setRequests(reqData.requests);
       if (userData.success) setUsers(userData.users);
-      if (m3uData.urls) setM3uLinks(m3uData.urls.join('\n')); // সেভ করা লিংকগুলো টেক্সট এরিয়ায় বসাচ্ছে
+      if (m3uData.urls) setM3uLinks(m3uData.urls.join('\n'));
 
     } catch (error) {
       console.error(error);
@@ -38,9 +45,19 @@ export default function AdminPanel() {
     }
   };
 
+  // 🛡️ সিকিউরিটি চেক: ইউজার কি আসলেই অ্যাডমিন?
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (status === 'unauthenticated') {
+      router.push('/login'); // লগিন করা না থাকলে লগিন পেজে পাঠাবে
+    } else if (status === 'authenticated') {
+      const userPhone = (session?.user as any)?.phone;
+      if (!ADMIN_NUMBERS.includes(userPhone)) {
+        router.push('/'); // সাধারণ ইউজার হলে হোমপেজে পাঠিয়ে দেবে
+      } else {
+        fetchData(); // কেবল অ্যাডমিন হলেই ডাটা লোড করবে
+      }
+    }
+  }, [status, session, router]);
 
   // 🎯 পেমেন্ট এপ্রুভ ফাংশন
   const handleApprove = async (paymentId: string, userId: string, pkg: string) => {
@@ -72,7 +89,7 @@ export default function AdminPanel() {
     } catch (error) { alert("সার্ভার এরর!"); }
   };
 
-  // 🎯 M3U Sync ফাংশন (এডিট এবং ডিলিট সহ)
+  // 🎯 M3U Sync ফাংশন
   const handleSyncM3U = async () => {
     setSyncing(true);
     try {
@@ -89,6 +106,16 @@ export default function AdminPanel() {
     setSyncing(false);
   };
 
+  // 🛑 অ্যাডমিন ভেরিফাই না হওয়া পর্যন্ত লোডিং দেখাবে
+  if (status === 'loading' || status === 'unauthenticated' || !ADMIN_NUMBERS.includes((session?.user as any)?.phone)) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-400 font-bold">Checking Admin Privileges...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans p-4 md:p-8 relative">
       <div className="max-w-6xl mx-auto relative z-10">
@@ -98,7 +125,6 @@ export default function AdminPanel() {
           <Link href="/" className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">হোমে যান</Link>
         </div>
 
-        {/* 🎯 TABS NAV */}
         <div className="flex gap-4 mb-8 overflow-x-auto pb-2 border-b border-slate-800">
           <button onClick={() => setActiveTab('payments')} className={`px-6 py-3 rounded-xl font-bold transition-all whitespace-nowrap ${activeTab === 'payments' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20' : 'bg-slate-900 text-slate-400 hover:bg-slate-800'}`}>
             পেমেন্ট রিকোয়েস্ট ({requests.length})
@@ -115,7 +141,6 @@ export default function AdminPanel() {
           <div className="animate-pulse text-slate-400">ডেটা লোড হচ্ছে...</div>
         ) : (
           <>
-            {/* 🎯 TAB: PAYMENTS */}
             {activeTab === 'payments' && (
               <div className="grid gap-4">
                 {requests.length === 0 ? <p className="text-slate-400 p-6 bg-slate-900 rounded-xl text-center">কোনো পেন্ডিং পেমেন্ট নেই।</p> : 
@@ -141,7 +166,6 @@ export default function AdminPanel() {
               </div>
             )}
 
-            {/* 🎯 TAB: USERS */}
             {activeTab === 'users' && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto">
@@ -192,7 +216,6 @@ export default function AdminPanel() {
               </div>
             )}
 
-            {/* 🎯 TAB: M3U MANAGER */}
             {activeTab === 'm3u' && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-yellow-500">📺 M3U Manager</h2>
