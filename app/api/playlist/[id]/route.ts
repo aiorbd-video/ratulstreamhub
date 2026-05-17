@@ -1,4 +1,3 @@
-// ফাইল পাথ: app/api/playlist/[id]/route.ts
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
@@ -16,7 +15,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     }
 
     const now = new Date();
-    // 🛡️ প্লেলিস্ট লেভেল সিকিউরিটি
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
       if (user.isPremium) {
         await db.collection("web_users").updateOne({ _id: new ObjectId(params.id) }, { $set: { isPremium: false } });
@@ -34,7 +32,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 পার্ট ১: টেলিগ্রাম বট থেকে আসা লিংকগুলো (যেহেতু এগুলোতে আপনার নিজস্ব ক্যাটাগরি, তাই এটা আগের মতোই থাকবে)
+    // 🎯 পার্ট ১: টেলিগ্রাম বট থেকে আসা লিংকগুলো মাস্কিং করা
     streams.forEach(stream => {
       let rawTitle = stream.title || "";
       let logo = stream.logo || ""; 
@@ -63,14 +61,16 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         }
 
         const encodedUrl = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
-        const secureUrl = `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encodedUrl}${pipeHeaders}`;
+        
+        // 🎯 আপগ্রেড: লিংকের মাঝখানে /live.m3u8 এক্সটেনশন যুক্ত করা হলো অ্যাপগুলোর সাপোর্টের জন্য
+        const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}${pipeHeaders}`;
         
         m3uContent += `#EXTINF:-1 tvg-logo="${logo}" group-title="${group}", ${cleanTitle}\n`;
         m3uContent += `${secureUrl}\n`;
       }
     });
 
-    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো (Line-by-Line Processing)
+    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো মাস্কিং করা (Line-by-Line)
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
       const lines = mergedM3uDoc.content.split('\n');
@@ -78,15 +78,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
       for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
-        
-        if (!line) continue; // ফাঁকা লাইন স্কিপ করবে
+        if (!line) continue;
 
         if (line.startsWith('#')) {
-          // 🚀 ম্যাজিক: যদি লাইনটি # দিয়ে শুরু হয় (যেমন: #EXTINF), তারমানে এটি লোগো, নাম বা ক্যাটাগরির লাইন। 
-          // এটিকে কোনো এডিট ছাড়া হুবহু বসিয়ে দেওয়া হচ্ছে, যাতে অরিজিনাল ডাটা ১০০% ঠিক থাকে।
           secureMergedContent += line + '\n';
         } else if (line.startsWith('http')) {
-          // 🔒 যদি লাইনটি http দিয়ে শুরু হয়, তারমানে এটি স্ট্রিমিং লিংক। শুধু এটিকেই মাস্ক করা হবে।
           let urlStr = line;
           let pipeHeaders = "";
 
@@ -97,15 +93,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           }
 
           const encoded = encodeURIComponent(Buffer.from(urlStr).toString('base64'));
-          const secureUrl = `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
+          
+          // 🎯 আপগ্রেড: এখানেও /live.m3u8 এক্সটেনশন যুক্ত করা হলো
+          const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
           
           secureMergedContent += secureUrl + '\n';
         } else {
-          // অন্য কোনো লাইন থাকলে হুবহু বসে যাবে
           secureMergedContent += line + '\n';
         }
       }
-      
       m3uContent += "\n" + secureMergedContent;
     }
 
