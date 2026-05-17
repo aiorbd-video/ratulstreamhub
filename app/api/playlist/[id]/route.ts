@@ -16,6 +16,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     }
 
     const now = new Date();
+    // 🛡️ প্লেলিস্ট লেভেল সিকিউরিটি: ইউজারের মেয়াদ শেষ হলে ব্লক করে দেবে
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
       if (user.isPremium) {
         await db.collection("web_users").updateOne({ _id: new ObjectId(params.id) }, { $set: { isPremium: false } });
@@ -33,6 +34,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
+    // 🎯 পার্ট ১: টেলিগ্রাম বট থেকে আসা লিংকগুলো (এগুলো আপনার নিজস্ব, তাই মাস্কিং করা থাকবে)
     streams.forEach(stream => {
       let rawTitle = stream.title || "";
       let logo = stream.logo || ""; 
@@ -51,7 +53,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       const url = stream.stream_url;
 
       if (url) {
-        // 🎯 ফিক্স: বট থেকে আসা লিংকের স্পেস ক্লিন করা
         const cleanUrl = url.replace(/[\r\n\s]+/g, "").trim();
         const encodedUrl = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
         const secureUrl = `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encodedUrl}`;
@@ -61,15 +62,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     });
 
+    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো (Raw Append - কোনো এডিট ছাড়া সরাসরি বসানো)
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
-      const secureMergedContent = mergedM3uDoc.content.replace(/^(https?:\/\/.*)$/gm, (match: string) => {
-        // 🎯 ফিক্স: অ্যাডমিন প্যানেল থেকে আসা লিংকের হিডেন ক্যারেক্টার (\r) জোরপূর্বক ক্লিন করা
-        const cleanUrl = match.replace(/[\r\n\s]+/g, "").trim();
-        const encoded = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
-        return `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encoded}`;
-      });
-      m3uContent += "\n" + secureMergedContent;
+      // এখানে কোনো replace() বা মাস্কিং নেই। সরাসরি অরিজিনাল ডাটা বসিয়ে দেওয়া হলো।
+      m3uContent += "\n" + mergedM3uDoc.content;
     }
 
     return new Response(m3uContent, {
