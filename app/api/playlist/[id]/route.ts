@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     }
 
     const now = new Date();
-    // 🛡️ প্লেলিস্ট লেভেল সিকিউরিটি: ইউজারের মেয়াদ শেষ হলে ব্লক করে দেবে
+    // 🛡️ প্লেলিস্ট লেভেল সিকিউরিটি
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
       if (user.isPremium) {
         await db.collection("web_users").updateOne({ _id: new ObjectId(params.id) }, { $set: { isPremium: false } });
@@ -34,7 +34,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 পার্ট ১: টেলিগ্রাম বট থেকে আসা লিংকগুলো মাস্কিং করা
+    // 🎯 পার্ট ১: টেলিগ্রাম বট থেকে আসা লিংকগুলো (যেহেতু এগুলোতে আপনার নিজস্ব ক্যাটাগরি, তাই এটা আগের মতোই থাকবে)
     streams.forEach(stream => {
       let rawTitle = stream.title || "";
       let logo = stream.logo || ""; 
@@ -70,26 +70,42 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     });
 
-    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো মাস্কিং করা (Pipe Header বাইপাস ট্রিক সহ)
+    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো (Line-by-Line Processing)
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
-      const secureMergedContent = mergedM3uDoc.content.replace(/(https?:\/\/[^\r\n]+)/g, (match: string) => {
-        let urlStr = match.trim();
-        let pipeHeaders = "";
+      const lines = mergedM3uDoc.content.split('\n');
+      let secureMergedContent = '';
 
-        // 🎯 লিংক থেকে Pipe Header আলাদা করা হচ্ছে
-        if (urlStr.includes("|")) {
-          const parts = urlStr.split("|");
-          urlStr = parts[0]; 
-          pipeHeaders = "|" + parts.slice(1).join("|"); 
-        }
-
-        // 🔒 শুধুমাত্র মেইন লিংকটিকে এনকোড করা হচ্ছে
-        const encoded = encodeURIComponent(Buffer.from(urlStr).toString('base64'));
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
         
-        // 🚀 এনকোড লিংকের সাথে Pipe Header জুড়ে দেওয়া হচ্ছে
-        return `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
-      });
+        if (!line) continue; // ফাঁকা লাইন স্কিপ করবে
+
+        if (line.startsWith('#')) {
+          // 🚀 ম্যাজিক: যদি লাইনটি # দিয়ে শুরু হয় (যেমন: #EXTINF), তারমানে এটি লোগো, নাম বা ক্যাটাগরির লাইন। 
+          // এটিকে কোনো এডিট ছাড়া হুবহু বসিয়ে দেওয়া হচ্ছে, যাতে অরিজিনাল ডাটা ১০০% ঠিক থাকে।
+          secureMergedContent += line + '\n';
+        } else if (line.startsWith('http')) {
+          // 🔒 যদি লাইনটি http দিয়ে শুরু হয়, তারমানে এটি স্ট্রিমিং লিংক। শুধু এটিকেই মাস্ক করা হবে।
+          let urlStr = line;
+          let pipeHeaders = "";
+
+          if (urlStr.includes("|")) {
+            const parts = urlStr.split("|");
+            urlStr = parts[0]; 
+            pipeHeaders = "|" + parts.slice(1).join("|"); 
+          }
+
+          const encoded = encodeURIComponent(Buffer.from(urlStr).toString('base64'));
+          const secureUrl = `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
+          
+          secureMergedContent += secureUrl + '\n';
+        } else {
+          // অন্য কোনো লাইন থাকলে হুবহু বসে যাবে
+          secureMergedContent += line + '\n';
+        }
+      }
+      
       m3uContent += "\n" + secureMergedContent;
     }
 
