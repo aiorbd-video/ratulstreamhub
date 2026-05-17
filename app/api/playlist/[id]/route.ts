@@ -34,14 +34,18 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 বট থেকে আসা স্ট্রিমগুলো মাস্কিং করা
+    // 🎯 বট থেকে আসা স্ট্রিমগুলো প্রসেস ও মাস্কিং করা
     streams.forEach(stream => {
       let rawTitle = stream.title || "";
-      let logo = "";
+      let logo = stream.logo || ""; // 🎯 ডাটাবেস থেকে সরাসরি লোগো নেওয়া হচ্ছে
+      let group = stream.group || "All In One Reborn VIP"; // 🎯 অরিজিনাল ক্যাটাগরি নেওয়া হচ্ছে
 
-      const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
-      if (logoMatch) logo = logoMatch[1];
-      else logo = "https://placehold.co/600x400/1e293b/ef4444?text=LIVE+TV";
+      // ডাটাবেসে লোগো না থাকলে টাইটেল থেকে খুঁজবে
+      if (!logo) {
+        const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
+        if (logoMatch) logo = logoMatch[1];
+        else logo = "https://placehold.co/600x400/1e293b/ef4444?text=LIVE+TV";
+      }
 
       rawTitle = rawTitle.replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "");
       rawTitle = rawTitle.replace(/(https?:\/\/[^\s]+)/g, "");
@@ -50,11 +54,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       const url = stream.stream_url;
 
       if (url) {
-        // 🔒 আসল লিংক এনকোড করা হচ্ছে
-        const encodedUrl = Buffer.from(url).toString('base64');
+        // 🔒 আসল লিংক এনকোড করা হচ্ছে (URL Safe Encoding সহ)
+        const encodedUrl = encodeURIComponent(Buffer.from(url).toString('base64'));
         const secureUrl = `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encodedUrl}`;
         
-        m3uContent += `#EXTINF:-1 tvg-logo="${logo}" group-title="All In One Reborn VIP", ${cleanTitle}\n`;
+        m3uContent += `#EXTINF:-1 tvg-logo="${logo}" group-title="${group}", ${cleanTitle}\n`;
         m3uContent += `${secureUrl}\n`;
       }
     });
@@ -62,9 +66,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     // 🎯 অ্যাডমিন প্যানেল থেকে সিংক করা বিশাল ফোল্ডারের লিংকগুলো মাস্কিং করা
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
-      // রেগুলার এক্সপ্রেশন দিয়ে সব http/https লিংক খুঁজে বের করে এনকোড করে দেওয়া হচ্ছে
+      // রেগুলার এক্সপ্রেশন দিয়ে সব http/https লিংক খুঁজে বের করে নিরাপদভাবে এনকোড করা হচ্ছে
       const secureMergedContent = mergedM3uDoc.content.replace(/^(https?:\/\/.*)$/gm, (match: string) => {
-        const encoded = Buffer.from(match).toString('base64');
+        const encoded = encodeURIComponent(Buffer.from(match).toString('base64'));
         return `${baseUrl}/api/secure-play?uid=${user._id}&stream=${encoded}`;
       });
       m3uContent += "\n" + secureMergedContent;
