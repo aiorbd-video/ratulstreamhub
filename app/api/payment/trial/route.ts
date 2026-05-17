@@ -26,7 +26,7 @@ export async function POST(req: Request) {
 
     // ⏳ 120 মিনিটের জন্য ফ্রি ট্রায়াল টাইম সেট করা হলো
     const expiryDate = new Date();
-    expiryDate.setMinutes(expiryDate.getMinutes() + 120);
+    expiryDate.setMinutes(expiryDate.getMinutes() + 20);
 
     // ইউজারকে প্রিমিয়াম করা হলো এবং ট্রায়াল লক মার্কার (hasUsedTrial) সেট করা হলো
     await db.collection("web_users").updateOne(
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       }
     );
 
-    return NextResponse.json({ message: "আপনার ১২০ মিনিটের ফ্রি ট্রায়াল সফলভাবে চালু হয়েছে! উপভোগ করুন সম্পূর্ণ অ্যাড-ফ্রি স্ট্রিমিং।", success: true });
+    return NextResponse.json({ message: "আপনার ২০ মিনিটের ফ্রি ট্রায়াল সফলভাবে চালু হয়েছে! উপভোগ করুন সম্পূর্ণ অ্যাড-ফ্রি স্ট্রিমিং।", success: true });
   } catch (error) {
     return NextResponse.json({ message: "সার্ভারে কোনো সমস্যা হয়েছে!" }, { status: 500 });
   }
