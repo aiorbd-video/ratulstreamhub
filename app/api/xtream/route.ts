@@ -1,9 +1,10 @@
+// ফাইল পাথ: app/api/xtream/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import bcrypt from 'bcryptjs'; // 🎯 নতুন যুক্ত করা হলো
 
 export const dynamic = 'force-dynamic';
 
-// 🎯 ডাইনামিক Numeric ID জেনারেটর (Xtream এর জন্য আইডি অবশ্যই সংখ্যা হতে হবে)
 const generateId = (str: string) => {
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
@@ -29,7 +30,6 @@ async function handleRequest(req: Request) {
     let password = url.searchParams.get('password');
     let action = url.searchParams.get('action');
 
-    // POST মেথডের ডাটা পার্সিং
     if (req.method === 'POST') {
       const contentType = req.headers.get('content-type') || '';
       try {
@@ -56,8 +56,19 @@ async function handleRequest(req: Request) {
     const db = client.db("all_in_one_reborn_db");
     const user = await db.collection("web_users").findOne({ phone: username });
 
-    // পাসওয়ার্ড ভেরিফিকেশন (ফোন নাম্বার ডিফল্ট পাসওয়ার্ড লজিক সহ)
-    if (!user || (user.password ? user.password !== password : password !== username)) {
+    // 🎯 ম্যাজিক ফিক্স: Bcrypt ডিক্রিপশন দিয়ে পাসওয়ার্ড চেক করা
+    let isPasswordValid = false;
+    if (user) {
+      if (user.password) {
+        // ডাটাবেসের হ্যাশ পাসওয়ার্ডের সাথে ইউজারের টাইপ করা পাসওয়ার্ড মেলাবে
+        isPasswordValid = await bcrypt.compare(password, user.password);
+      } else {
+        // পাসওয়ার্ড সেট না থাকলে নাম্বার দিয়ে মেলাবে
+        isPasswordValid = (password === username);
+      }
+    }
+
+    if (!user || !isPasswordValid) {
       return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Details" } }, { headers: corsHeaders });
     }
 
@@ -68,19 +79,18 @@ async function handleRequest(req: Request) {
       return NextResponse.json({ user_info: { auth: 0, status: "Expired" } }, { headers: corsHeaders });
     }
 
-    // 🎯 লগিন রেসপন্স (স্ট্রিক্ট টাইপ ইন্টিজার ফিক্সড)
     if (!action) {
       return NextResponse.json({
         user_info: {
           username: user.phone,
           password: password,
           message: "Welcome VIP User",
-          auth: 1, // Integer
+          auth: 1,
           status: "Active",
-          exp_date: user.premiumExpiry ? Math.floor(new Date(user.premiumExpiry).getTime() / 1000) : 1999999999, // Integer
-          is_trial: user.hasUsedTrial ? 0 : 1, // Integer
-          active_cons: 0, // Integer
-          max_connections: 1, // Integer
+          exp_date: user.premiumExpiry ? Math.floor(new Date(user.premiumExpiry).getTime() / 1000) : 1999999999,
+          is_trial: user.hasUsedTrial ? 0 : 1,
+          active_cons: 0,
+          max_connections: 1,
           allowed_output_formats: ["m3u8", "ts"]
         },
         server_info: {
@@ -96,7 +106,6 @@ async function handleRequest(req: Request) {
       }, { headers: corsHeaders });
     }
 
-    // 🎯 ক্যাটাগরি ডাটা প্রোভাইডার
     if (action === 'get_live_categories') {
       const streams = await db.collection("posted_streams").find({}).toArray();
       const categoriesMap = new Map();
@@ -124,7 +133,6 @@ async function handleRequest(req: Request) {
       return NextResponse.json(categories, { headers: corsHeaders });
     }
 
-    // 🎯 লাইভ স্ট্রিম ডাটা প্রোভাইডার (ডুপ্লিকেট রিমুভড)
     if (action === 'get_live_streams') {
       const streams = await db.collection("posted_streams").find({}).toArray();
       const liveStreams: any[] = [];
@@ -141,7 +149,7 @@ async function handleRequest(req: Request) {
           num: liveStreams.length + 1,
           name: cleanTitle,
           stream_type: "live",
-          stream_id: generateId(rawUrl), // Integer
+          stream_id: generateId(rawUrl),
           stream_icon: stream.logo || "",
           epg_channel_id: "",
           added: "1",
@@ -178,7 +186,7 @@ async function handleRequest(req: Request) {
                 num: liveStreams.length + 1,
                 name: currentTitle,
                 stream_type: "live",
-                stream_id: generateId(cleanUrl), // Integer
+                stream_id: generateId(cleanUrl),
                 stream_icon: currentLogo,
                 epg_channel_id: "",
                 added: "1",
@@ -196,7 +204,6 @@ async function handleRequest(req: Request) {
       return NextResponse.json(liveStreams, { headers: corsHeaders });
     }
 
-    // 🎬 VOD/Series Fallback (Smarters এর জন্য বাধ্যতামূলক)
     if (action.includes('vod') || action.includes('series')) {
       if (action === 'get_vod_categories' || action === 'get_series_categories') {
         return NextResponse.json([{ category_id: "9999", category_name: "Movies/Series", parent_id: 0 }], { headers: corsHeaders });
