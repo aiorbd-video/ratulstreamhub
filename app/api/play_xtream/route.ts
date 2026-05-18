@@ -27,7 +27,6 @@ export async function GET(req: Request) {
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
-    // ১. ইউজার ভেরিফিকেশন
     const user = await db.collection("web_users").findOne({ phone: username });
     
     let isPasswordValid = false;
@@ -45,23 +44,19 @@ export async function GET(req: Request) {
     
     const now = new Date();
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
-      // 🎯 ফিক্স: স্ট্যাটাস 302 দিয়ে রিডাইরেক্ট (IPTV প্লেয়ারদের জন্য বাধ্যতামূলক)
       return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", { status: 302 });
     }
 
-    // 🛡️ ২. অ্যান্টি-শেয়ারিং (সামান্য মডিফাই করা হলো যেন ফলস-ব্লক না হয়)
     const forwardedFor = req.headers.get('x-forwarded-for');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : 'unknown';
     const currentTime = now.getTime();
     
     if (user.activeIp && user.activeIp !== clientIp && (currentTime - (user.lastActiveTime || 0)) < 120000) {
-       // অন্য কেউ দেখলে ব্লক করবে, কিন্তু ২ মিনিটের বাফার দেওয়া হলো
        return new Response("Account is being used on another device!", { status: 403 });
     } else {
        await db.collection("web_users").updateOne({ _id: user._id }, { $set: { activeIp: clientIp, lastActiveTime: currentTime } });
     }
 
-    // ৩. Stream ID ম্যাচিং (সব ধরনের এক্সটেনশন যেমন .ts, .m3u8 ইগনোর করে)
     const targetId = parseInt(stream_id_raw.replace(/\.(m3u8|ts|mp4)$/, ''));
     let realUrl = "";
 
@@ -80,9 +75,10 @@ export async function GET(req: Request) {
         for (let line of lines) {
           line = line.trim();
           if (line.startsWith('http')) {
+            // পাইপ হেডার আলাদা না করে শুধু স্পেস ক্লিন করে চেক করা হচ্ছে
             const cleanUrl = line.split('|')[0].trim();
             if (generateId(cleanUrl) === targetId) {
-              realUrl = cleanUrl; 
+              realUrl = line; // সম্পূর্ণ অরিজিনাল পাইপসহ লিংকটি নেওয়া হলো
               break;
             }
           }
@@ -91,8 +87,15 @@ export async function GET(req: Request) {
     }
 
     if (realUrl) {
-      const finalRedirectUrl = realUrl.split('|')[0].trim();
-      // 🎯 আল্টিমেট ফিক্স: 302 ফাউন্ড স্ট্যাটাস দিয়ে অরিজিনাল ভিডিও লিংক সার্ভ করা
+      let finalRedirectUrl = realUrl.trim();
+      
+      // 🎯 আল্টিমেট ফিক্স: পাইপ (|) ক্যারেক্টারকে URL Encode (%7C) করা হলো। 
+      // এতে Next.js ক্র্যাশ করবে না এবং TiviMate/Smarters অ্যাপ ব্যাকগ্রাউন্ডে হেডারটি পার্স করতে পারবে।
+      if (finalRedirectUrl.includes('|')) {
+        const parts = finalRedirectUrl.split('|');
+        finalRedirectUrl = parts[0] + '%7C' + parts.slice(1).join('|');
+      }
+      
       return NextResponse.redirect(finalRedirectUrl, { status: 302 });
     } else {
       return new Response("Stream Not Found!", { status: 404 });
