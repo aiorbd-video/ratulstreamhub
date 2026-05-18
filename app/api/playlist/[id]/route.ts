@@ -34,23 +34,17 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const streams = await db.collection("posted_streams").find({}).toArray();
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 ডাটাবেস লিংক মাস্কিং
+    // 🎯 ডাটাবেস লিংক মাস্কিং (পুরো লিংক পাইপসহ Base64 হবে)
     streams.forEach(stream => {
       let rawTitle = (stream.title || "").replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "").replace(/(https?:\/\/[^\s]+)/g, "").replace(/^[,-\s]+/, "").trim() || "Live TV";
       const url = stream.stream_url;
 
       if (url) {
-        let cleanUrl = url.replace(/[\r\n\s]+/g, "").trim();
-        let pipeHeaders = "";
+        let fullUrlWithPipe = url.replace(/[\r\n\s]+/g, "").trim(); 
+        const encodedUrl = encodeURIComponent(Buffer.from(fullUrlWithPipe).toString('base64'));
         
-        if (cleanUrl.includes("|")) {
-          const parts = cleanUrl.split("|");
-          cleanUrl = parts[0]; 
-          pipeHeaders = "|" + parts.slice(1).join("|"); 
-        }
-
-        const encodedUrl = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
-        const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}${pipeHeaders}`;
+        // 🎯 পাইপ আর বাইরে রাখলাম না, সব Base64 এর ভেতর লুকিয়ে দিলাম
+        const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}`;
         
         m3uContent += `#EXTINF:-1 tvg-logo="${stream.logo || ''}" group-title="${stream.group || 'Live TV'}", ${rawTitle}\n`;
         m3uContent += `${secureUrl}\n`;
@@ -68,17 +62,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         if (line.startsWith('#')) {
           m3uContent += line + '\n';
         } else if (line.startsWith('http')) {
-          let urlStr = line;
-          let pipeHeaders = "";
-
-          if (urlStr.includes("|")) {
-            const parts = urlStr.split("|");
-            urlStr = parts[0]; 
-            pipeHeaders = "|" + parts.slice(1).join("|"); 
-          }
-
-          const encoded = encodeURIComponent(Buffer.from(urlStr).toString('base64'));
-          const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
+          let fullUrlWithPipe = line;
+          const encodedUrl = encodeURIComponent(Buffer.from(fullUrlWithPipe).toString('base64'));
+          const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}`;
           m3uContent += secureUrl + '\n';
         } else {
           m3uContent += line + '\n';
