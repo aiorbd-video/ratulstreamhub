@@ -9,30 +9,24 @@ export async function GET(req: Request) {
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🟢 হোয়াইটলিস্ট: মিডিয়া প্লেয়ার, অ্যান্ড্রয়েড অ্যাপ এবং স্মার্ট টিভি
+    // 🟢 ব্রাউজার হ্যাকার ব্লক করা (শুধুমাত্র আইপিটিভি অ্যাপ এবং ফোনে চলবে)
     const isMobileAppOrPlayer = 
       userAgent.includes('exoplayer') ||         
-      userAgent.includes('dalvik') ||            
       userAgent.includes('applecoremedia') ||    
       userAgent.includes('android') ||           
       userAgent.includes('iphone') ||            
       userAgent.includes('tv') ||                
       userAgent.includes('vlc') ||               
       userAgent.includes('smarters') ||          
-      userAgent.includes('iptv') ||              
-      userAgent.includes('kodi');                
+      userAgent.includes('iptv');                
 
-    // 🔴 ব্লকলিস্ট: শুধুমাত্র পিসির ডেস্কটপ ব্রাউজার (লিংক চুরির মূল জায়গা)
     const isDesktopBrowser = 
       (userAgent.includes('windows nt') || userAgent.includes('macintosh')) && 
-      (userAgent.includes('chrome') || userAgent.includes('firefox') || userAgent.includes('safari') || userAgent.includes('edge')) &&
+      (userAgent.includes('chrome') || userAgent.includes('firefox') || userAgent.includes('safari')) &&
       !isMobileAppOrPlayer;
 
     if (isDesktopBrowser) {
-      return new Response("🚫 Access Denied! Scraping from Desktop Browsers is strictly prohibited.", { 
-        status: 403,
-        headers: { 'Content-Type': 'text/plain' }
-      });
+      return new Response("🚫 Access Denied! This secure stream can only be played in IPTV Apps.", { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -40,7 +34,7 @@ export async function GET(req: Request) {
     const streamEncoded = searchParams.get('stream');
 
     if (!uid || !streamEncoded) {
-      return new Response("Unauthorized Access! Missing parameters.", { status: 401 });
+      return new Response("Unauthorized Access!", { status: 401 });
     }
 
     const client = await clientPromise;
@@ -53,7 +47,7 @@ export async function GET(req: Request) {
       return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
     }
 
-    // 🎯 ডিকোড এবং আসল লিংকে রিডাইরেক্ট (প্লেয়ার এখানে হেডারসহ আসবে, তাই শুধু মেইন লিংক দিলেই হবে)
+    // 🎯 ডিকোড করে অরিজিনাল লিংক বের করা এবং ডাইরেক্ট প্লে করা
     let realStreamUrl = Buffer.from(streamEncoded, 'base64').toString('utf-8');
     realStreamUrl = realStreamUrl.replace(/[\r\n\s]+/g, "").trim();
 
