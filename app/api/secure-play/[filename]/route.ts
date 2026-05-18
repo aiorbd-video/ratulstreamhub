@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🟢 ব্রাউজার হ্যাকার ব্লক করা (শুধুমাত্র আইপিটিভি অ্যাপ এবং ফোনে চলবে)
+    // 🟢 ব্রাউজার হ্যাকার ব্লক করা
     const isMobileAppOrPlayer = 
       userAgent.includes('exoplayer') ||         
       userAgent.includes('applecoremedia') ||    
@@ -47,11 +47,21 @@ export async function GET(req: Request) {
       return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
     }
 
-    // 🎯 ডিকোড করে অরিজিনাল লিংক বের করা এবং ডাইরেক্ট প্লে করা
-    let realStreamUrl = Buffer.from(streamEncoded, 'base64').toString('utf-8');
-    realStreamUrl = realStreamUrl.replace(/[\r\n\s]+/g, "").trim();
+    // 🎯 ডিকোড করে অরিজিনাল লিংক ও হেডার বের করা
+    let realStreamUrlWithPipe = Buffer.from(streamEncoded, 'base64').toString('utf-8');
+    realStreamUrlWithPipe = realStreamUrlWithPipe.replace(/[\r\n\s]+/g, "").trim();
 
-    return NextResponse.redirect(realStreamUrl);
+    // 🚀 আল্টিমেট ট্রিক: Redirect না করে একটি মিনি M3U8 প্লেলিস্ট রিটার্ন করা হলো। 
+    // ফলে প্লেয়ার নিজেই এই ফাইলের ভেতরের Pipe (|) রিড করে অরিজিনাল হেডারগুলো সেট করে নেবে!
+    const m3u8Wrapper = `#EXTM3U\n#EXTINF:-1, Live Stream\n${realStreamUrlWithPipe}`;
+
+    return new Response(m3u8Wrapper, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.apple.mpegurl",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
 
   } catch (error) {
     return new Response("Server Error", { status: 500 });
