@@ -1,4 +1,4 @@
-// 파일 পাথ: app/api/play_xtream/route.ts
+// ফাইল পাথ: app/api/play_xtream/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import bcrypt from 'bcryptjs';
@@ -13,16 +13,6 @@ const generateId = (str: string) => {
   return Math.abs(hash);
 };
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept",
-};
-
-export async function OPTIONS() {
-  return NextResponse.json({}, { headers: corsHeaders });
-}
-
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -31,12 +21,13 @@ export async function GET(req: Request) {
     const stream_id_raw = url.searchParams.get('stream_id');
 
     if (!username || !password || !stream_id_raw) {
-      return new Response("Missing parameters", { status: 400, headers: corsHeaders });
+      return new Response("Missing parameters", { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
+    // ১. ইউজার ভেরিফিকেশন
     const user = await db.collection("web_users").findOne({ phone: username });
     
     let isPasswordValid = false;
@@ -49,26 +40,21 @@ export async function GET(req: Request) {
     }
 
     if (!user || !isPasswordValid) {
-      return new Response("Unauthorized Access!", { status: 401, headers: corsHeaders });
+      return new Response("Unauthorized Access!", { status: 401 });
     }
     
     const now = new Date();
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
-      return new Response(null, {
-        status: 302,
-        headers: {
-          "Location": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-          ...corsHeaders
-        }
-      });
+      return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", { status: 302 });
     }
 
+    // ২. আইপি লক
     const forwardedFor = req.headers.get('x-forwarded-for');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : 'unknown';
     const currentTime = now.getTime();
     
     if (user.activeIp && user.activeIp !== clientIp && (currentTime - (user.lastActiveTime || 0)) < 120000) {
-       return new Response("Account is being used on another device!", { status: 403, headers: corsHeaders });
+       return new Response("Account is being used on another device!", { status: 403 });
     } else {
        await db.collection("web_users").updateOne({ _id: user._id }, { $set: { activeIp: clientIp, lastActiveTime: currentTime } });
     }
@@ -93,7 +79,7 @@ export async function GET(req: Request) {
           if (line.startsWith('http')) {
             const cleanUrl = line.split('|')[0].trim();
             if (generateId(cleanUrl) === targetId) {
-              realUrl = line; // পাইপসহ পুরো অরিজিনাল লাইনটি রিড করবে
+              realUrl = line; 
               break;
             }
           }
@@ -102,20 +88,81 @@ export async function GET(req: Request) {
     }
 
     if (realUrl) {
-      // 🚀 আল্টিমেট ট্রিক: Next.js এর কোনো রিডাইরেক্ট মেথড ব্যবহার না করে ডাইরেক্ট নেটিভ রেসপন্স পাঠানো হলো।
-      // এর ফলে পাইপের ভেতরের User-Agent, Cookie, Referer, Origin সব ১০০% অক্ষত অবস্থায় প্লেয়ারের কাছে যাবে।
-      return new Response(null, {
-        status: 302,
-        headers: {
-          "Location": realUrl.trim(),
-          ...corsHeaders
-        }
-      });
+      let finalUrl = realUrl.trim();
+      
+      // 🎯 ডিফল্ট ফেক হেডার (যদি লিংকে হেডার না থাকে)
+      let customHeaders: Record<string, string> = {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "*/*"
+      };
+
+      // 🎯 ম্যাজিক পার্ট ১: পাইপ (|) থেকে হেডারগুলো আলাদা করে সার্ভারে সেট করা
+      if (finalUrl.includes('|')) {
+          const parts = finalUrl.split('|');
+          finalUrl = parts[0].trim();
+          const headerString = parts.slice(1).join('&').replace(/\|/g, '&');
+          const headerPairs = headerString.split('&');
+          for (const pair of headerPairs) {
+              const [key, ...valueParts] = pair.split('=');
+              if (key && valueParts.length > 0) {
+                  customHeaders[key.trim()] = decodeURIComponent(valueParts.join('=').trim());
+              }
+          }
+      }
+
+      try {
+          // 🎯 ম্যাজিক পার্ট ২: Vercel নিজে সঠিক হেডার দিয়ে অরিজিনাল সার্ভার থেকে M3U8 ডাউনলোড করবে
+          const sourceRes = await fetch(finalUrl, { 
+              headers: customHeaders,
+              redirect: 'follow'
+          });
+
+          const contentType = sourceRes.headers.get('content-type') || '';
+
+          // 🎯 ম্যাজিক পার্ট ৩: যদি এটি HLS (.m3u8) লাইভ স্ট্রিম হয়, তবে সেটিকে প্রক্সি করে প্লেয়ারে দেওয়া হবে
+          if (contentType.includes('mpegurl') || contentType.includes('m3u8') || finalUrl.includes('.m3u8')) {
+              const text = await sourceRes.text();
+              const baseUrl = new URL(sourceRes.url || finalUrl);
+              const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+
+              // ফাইলের ভেতরের খণ্ডিত লিংকগুলোকে পূর্ণাঙ্গ লিংকে রূপান্তর করা
+              const rewrittenText = text.split('\n').map(line => {
+                  const trimmedLine = line.trim();
+                  if (!trimmedLine || trimmedLine.startsWith('#')) return line;
+                  
+                  if (trimmedLine.startsWith('http')) return trimmedLine;
+                  if (trimmedLine.startsWith('/')) return `${baseUrl.protocol}//${baseUrl.host}${trimmedLine}`;
+                  return `${baseUrl.protocol}//${baseUrl.host}${basePath}${trimmedLine}`;
+              }).join('\n');
+
+              return new Response(rewrittenText, {
+                  status: 200,
+                  headers: {
+                      'Content-Type': 'application/vnd.apple.mpegurl',
+                      'Access-Control-Allow-Origin': '*'
+                  }
+              });
+          } else {
+              // যদি সরাসরি .ts বা .mp4 ফাইল হয়, তবে প্রক্সি না করে শুধু রিডাইরেক্ট করবে
+              return new Response(null, {
+                  status: 302,
+                  headers: { 'Location': finalUrl, 'Access-Control-Allow-Origin': '*' }
+              });
+          }
+
+      } catch (e) {
+          // সার্ভার রেসপন্স না দিলে ফলব্যাক হিসেবে রিডাইরেক্ট
+          return new Response(null, {
+              status: 302,
+              headers: { 'Location': finalUrl, 'Access-Control-Allow-Origin': '*' }
+          });
+      }
+
     } else {
-      return new Response("Stream Not Found!", { status: 404, headers: corsHeaders });
+      return new Response("Stream Not Found!", { status: 404 });
     }
 
   } catch (error) {
-    return new Response("Server Error", { status: 500, headers: corsHeaders });
+    return new Response("Server Error", { status: 500 });
   }
 }
