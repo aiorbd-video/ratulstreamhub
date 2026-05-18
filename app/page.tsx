@@ -17,13 +17,16 @@ interface Stream {
 
 export default function Home() {
   const { data: session } = useSession();
+  
+  // 🎯 ইউজার আইডি এবং প্রিমিয়াম স্ট্যাটাস চেক করা
   const isPremium = (session?.user as any)?.isPremium === true;
+  const userId = (session?.user as any)?._id || (session?.user as any)?.id || '';
 
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // 🎯 M3U পপআপ এবং হোস্ট ইউআরএল স্টেট
+  // M3U পপআপ এবং হোস্ট ইউআরএল স্টেট
   const [showM3uModal, setShowM3uModal] = useState(false);
   const [baseUrl, setBaseUrl] = useState('');
 
@@ -220,23 +223,28 @@ export default function Home() {
               📺 M3U Playlist URL
             </h3>
             <p className="text-xs text-slate-400 mb-5 leading-relaxed">
-              যেকোনো আইপিটিভি অ্যাপে (যেমন: <span className="text-white font-semibold">TiviMate</span> বা <span className="text-white font-semibold">IPTV Smarters Pro</span>) <b>"M3U Link"</b> হিসেবে নিচের লিংকটি কপি করে বসিয়ে দিন।
+              যেকোনো আইপিটিভি অ্যাপে <b>"M3U Link"</b> হিসেবে নিচের লিংকটি কপি করে বসিয়ে দিন।
             </p>
             
             <div className="space-y-4">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">আপনার ব্যক্তিগত M3U লিংক:</label>
                 <div className="flex gap-2">
+                  {/* 🎯 এখানে userId ব্যবহার করা হয়েছে */}
                   <input 
                     type="text" 
                     readOnly 
-                    value={`${baseUrl}/api/playlist/${(session?.user as any)?._id}`} 
+                    value={userId ? `${baseUrl}/api/playlist/${userId}` : "লগইন সেশন রিফ্রেশ করুন..."} 
                     className="w-full bg-slate-950 border border-slate-800 px-3 py-3 rounded-xl text-xs font-mono text-green-400 select-all outline-none shadow-inner" 
                   />
                   <button 
                     onClick={() => { 
-                      navigator.clipboard.writeText(`${baseUrl}/api/playlist/${(session?.user as any)?._id}`); 
-                      alert("✅ M3U Link কপি হয়েছে!"); 
+                      if(userId) {
+                        navigator.clipboard.writeText(`${baseUrl}/api/playlist/${userId}`); 
+                        alert("✅ M3U Link কপি হয়েছে!"); 
+                      } else {
+                        alert("❌ আইডি পাওয়া যায়নি। দয়া করে একবার লগআউট করে আবার লগইন করুন।");
+                      }
                     }} 
                     className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 rounded-xl text-xs font-bold transition-all shadow-md whitespace-nowrap"
                   >
@@ -247,7 +255,7 @@ export default function Home() {
             </div>
 
             <div className="mt-6 bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-[11px] text-red-300 leading-relaxed shadow-inner">
-              ⚠️ <b>সতর্কতা:</b> এই লিংকটি শুধুমাত্র আপনার ব্যবহারের জন্য। অন্য কারো সাথে শেয়ার করলে আপনার প্রিমিয়াম অ্যাকাউন্ট স্বয়ংক্রিয়ভাবে ব্লক হয়ে যাবে।
+              ⚠️ <b>সতর্কতা:</b> এই লিংকটি শুধুমাত্র আপনার ব্যবহারের জন্য। অন্য কারো সাথে শেয়ার করলে আপনার অ্যাকাউন্ট স্বয়ংক্রিয়ভাবে ব্লক হয়ে যাবে।
             </div>
 
             <button onClick={() => setShowM3uModal(false)} className="mt-5 w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold py-3.5 rounded-xl text-sm transition-all shadow-sm">
