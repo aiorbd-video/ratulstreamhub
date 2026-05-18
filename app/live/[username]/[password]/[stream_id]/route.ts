@@ -1,6 +1,7 @@
-// 파일 পাথ: app/live/[username]/[password]/[stream_id]/route.ts
+// ফাইল পাথ: app/live/[username]/[password]/[stream_id]/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import bcrypt from 'bcryptjs'; // 🎯 নতুন যুক্ত করা হলো
 
 export const dynamic = 'force-dynamic';
 
@@ -18,17 +19,26 @@ export async function GET(req: Request, { params }: { params: { username: string
     const db = client.db("all_in_one_reborn_db");
 
     const user = await db.collection("web_users").findOne({ phone: params.username });
-    const now = new Date();
     
-    if (!user || (user.password ? user.password !== params.password : params.password !== params.username)) {
+    // 🎯 ম্যাজিক ফিক্স: ভিডিও প্লে করার সময়ও ডিক্রিপ্ট করে মেলাতে হবে
+    let isPasswordValid = false;
+    if (user) {
+      if (user.password) {
+        isPasswordValid = await bcrypt.compare(params.password, user.password);
+      } else {
+        isPasswordValid = (params.password === params.username);
+      }
+    }
+
+    if (!user || !isPasswordValid) {
       return new Response("Unauthorized Access!", { status: 401 });
     }
     
+    const now = new Date();
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
       return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
     }
 
-    // 🛡️ অ্যান্টি-শেয়ারিং (IP Lock শুধুমাত্র ভিডিও প্লে করার সময় একটিভ হবে)
     const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
     const currentTime = now.getTime();
     
@@ -38,7 +48,6 @@ export async function GET(req: Request, { params }: { params: { username: string
     
     await db.collection("web_users").updateOne({ _id: user._id }, { $set: { activeIp: clientIp, lastActiveTime: currentTime } });
 
-    // Stream ID থেকে এক্সটেনশন (.m3u8 বা .ts) রিমুভ করা
     const targetId = parseInt(params.stream_id.replace(/\.(m3u8|ts|mp4)$/, ''));
     let realUrl = "";
 
