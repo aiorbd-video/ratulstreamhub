@@ -1,3 +1,4 @@
+// ফাইল পাথ: app/api/playlist/[id]/route.ts
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
@@ -16,9 +17,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     const now = new Date();
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
-      if (user.isPremium) {
-        await db.collection("web_users").updateOne({ _id: new ObjectId(params.id) }, { $set: { isPremium: false } });
-      }
       return new Response("#EXTM3U\n#EXTINF:-1 tvg-logo=\"https://placehold.co/600x400/000/f00?text=Expired\", 🚫 Subscription Expired! Please Renew.\nhttp://expired.local", {
         headers: { "Content-Type": "application/vnd.apple.mpegurl" }
       });
@@ -32,17 +30,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 পার্ট ১: টেলিগ্রাম বট থেকে আসা লিংকগুলো মাস্কিং করা
+    // 🎯 পার্ট ১: ডাটাবেস থেকে আসা লিংকগুলো মাস্কিং করা
     streams.forEach(stream => {
       let rawTitle = stream.title || "";
       let logo = stream.logo || ""; 
-      let group = stream.group || "All In One Reborn VIP"; 
-
-      if (!logo) {
-        const logoMatch = rawTitle.match(/tvg-logo="([^"]+)"/);
-        if (logoMatch) logo = logoMatch[1];
-        else logo = "https://placehold.co/600x400/1e293b/ef4444?text=LIVE+TV";
-      }
+      let group = stream.group || "Live TV"; 
 
       rawTitle = rawTitle.replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "");
       rawTitle = rawTitle.replace(/(https?:\/\/[^\s]+)/g, "");
@@ -61,8 +53,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         }
 
         const encodedUrl = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
-        
-        // 🎯 আপগ্রেড: লিংকের মাঝখানে /live.m3u8 এক্সটেনশন যুক্ত করা হলো অ্যাপগুলোর সাপোর্টের জন্য
         const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}${pipeHeaders}`;
         
         m3uContent += `#EXTINF:-1 tvg-logo="${logo}" group-title="${group}", ${cleanTitle}\n`;
@@ -70,7 +60,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     });
 
-    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো মাস্কিং করা (Line-by-Line)
+    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো লাইন-বাই-লাইন মাস্কিং করা
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
       const lines = mergedM3uDoc.content.split('\n');
@@ -81,7 +71,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         if (!line) continue;
 
         if (line.startsWith('#')) {
-          secureMergedContent += line + '\n';
+          secureMergedContent += line + '\n'; // ক্যাটাগরি, লোগো, নাম হুবহু থাকবে
         } else if (line.startsWith('http')) {
           let urlStr = line;
           let pipeHeaders = "";
@@ -93,8 +83,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           }
 
           const encoded = encodeURIComponent(Buffer.from(urlStr).toString('base64'));
-          
-          // 🎯 আপগ্রেড: এখানেও /live.m3u8 এক্সটেনশন যুক্ত করা হলো
           const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
           
           secureMergedContent += secureUrl + '\n';
