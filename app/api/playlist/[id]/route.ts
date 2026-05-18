@@ -43,9 +43,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         let fullUrlWithPipe = url.replace(/[\r\n\s]+/g, "").trim(); 
         const encodedUrl = encodeURIComponent(Buffer.from(fullUrlWithPipe).toString('base64'));
         
-        // 🎯 পাইপ আর বাইরে রাখলাম না, সব Base64 এর ভেতর লুকিয়ে দিলাম
         const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}`;
-        
         m3uContent += `#EXTINF:-1 tvg-logo="${stream.logo || ''}" group-title="${stream.group || 'Live TV'}", ${rawTitle}\n`;
         m3uContent += `${secureUrl}\n`;
       }
@@ -62,7 +60,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         if (line.startsWith('#')) {
           m3uContent += line + '\n';
         } else if (line.startsWith('http')) {
-          let fullUrlWithPipe = line;
+          let fullUrlWithPipe = line.replace(/[\r\n\s]+/g, "").trim();
           const encodedUrl = encodeURIComponent(Buffer.from(fullUrlWithPipe).toString('base64'));
           const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}`;
           m3uContent += secureUrl + '\n';
