@@ -1,3 +1,4 @@
+// ফাইল পাথ: app/api/secure-play/[filename]/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
@@ -8,7 +9,7 @@ export async function GET(req: Request) {
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🟢 হোয়াইটলিস্ট (Whitelist): মিডিয়া প্লেয়ার, অ্যান্ড্রয়েড অ্যাপ এবং স্মার্ট টিভি
+    // 🟢 হোয়াইটলিস্ট: মিডিয়া প্লেয়ার, অ্যান্ড্রয়েড অ্যাপ এবং স্মার্ট টিভি
     const isMobileAppOrPlayer = 
       userAgent.includes('exoplayer') ||         
       userAgent.includes('dalvik') ||            
@@ -21,14 +22,14 @@ export async function GET(req: Request) {
       userAgent.includes('iptv') ||              
       userAgent.includes('kodi');                
 
-    // 🔴 ব্লকলিস্ট (Blocklist): শুধুমাত্র পিসির ডেস্কটপ ব্রাউজার
+    // 🔴 ব্লকলিস্ট: শুধুমাত্র পিসির ডেস্কটপ ব্রাউজার (লিংক চুরির মূল জায়গা)
     const isDesktopBrowser = 
       (userAgent.includes('windows nt') || userAgent.includes('macintosh')) && 
       (userAgent.includes('chrome') || userAgent.includes('firefox') || userAgent.includes('safari') || userAgent.includes('edge')) &&
       !isMobileAppOrPlayer;
 
     if (isDesktopBrowser) {
-      return new Response("🚫 Access Denied!", { 
+      return new Response("🚫 Access Denied! Scraping from Desktop Browsers is strictly prohibited.", { 
         status: 403,
         headers: { 'Content-Type': 'text/plain' }
       });
@@ -52,7 +53,7 @@ export async function GET(req: Request) {
       return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
     }
 
-    // 🎯 ডিকোড এবং ইউআরএল ফরম্যাটিং ক্লিনআপ
+    // 🎯 ডিকোড এবং আসল লিংকে রিডাইরেক্ট (প্লেয়ার এখানে হেডারসহ আসবে, তাই শুধু মেইন লিংক দিলেই হবে)
     let realStreamUrl = Buffer.from(streamEncoded, 'base64').toString('utf-8');
     realStreamUrl = realStreamUrl.replace(/[\r\n\s]+/g, "").trim();
 
