@@ -1,4 +1,4 @@
-// ফাইল পাথ: app/api/play_xtream/route.ts
+// 파일 পাথ: app/api/play_xtream/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import bcrypt from 'bcryptjs';
@@ -13,6 +13,16 @@ const generateId = (str: string) => {
   return Math.abs(hash);
 };
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept",
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -21,7 +31,7 @@ export async function GET(req: Request) {
     const stream_id_raw = url.searchParams.get('stream_id');
 
     if (!username || !password || !stream_id_raw) {
-      return new Response("Missing parameters", { status: 400 });
+      return new Response("Missing parameters", { status: 400, headers: corsHeaders });
     }
 
     const client = await clientPromise;
@@ -39,12 +49,18 @@ export async function GET(req: Request) {
     }
 
     if (!user || !isPasswordValid) {
-      return new Response("Unauthorized Access!", { status: 401 });
+      return new Response("Unauthorized Access!", { status: 401, headers: corsHeaders });
     }
     
     const now = new Date();
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
-      return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", { status: 302 });
+      return new Response(null, {
+        status: 302,
+        headers: {
+          "Location": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+          ...corsHeaders
+        }
+      });
     }
 
     const forwardedFor = req.headers.get('x-forwarded-for');
@@ -52,7 +68,7 @@ export async function GET(req: Request) {
     const currentTime = now.getTime();
     
     if (user.activeIp && user.activeIp !== clientIp && (currentTime - (user.lastActiveTime || 0)) < 120000) {
-       return new Response("Account is being used on another device!", { status: 403 });
+       return new Response("Account is being used on another device!", { status: 403, headers: corsHeaders });
     } else {
        await db.collection("web_users").updateOne({ _id: user._id }, { $set: { activeIp: clientIp, lastActiveTime: currentTime } });
     }
@@ -62,7 +78,7 @@ export async function GET(req: Request) {
 
     const streams = await db.collection("posted_streams").find({}).toArray();
     for (const s of streams) {
-      if (s.stream_url && generateId(s.stream_url) === targetId) {
+      if (s.stream_url && generateId(s.stream_url.split('|')[0].trim()) === targetId) {
         realUrl = s.stream_url;
         break;
       }
@@ -75,10 +91,9 @@ export async function GET(req: Request) {
         for (let line of lines) {
           line = line.trim();
           if (line.startsWith('http')) {
-            // পাইপ হেডার আলাদা না করে শুধু স্পেস ক্লিন করে চেক করা হচ্ছে
             const cleanUrl = line.split('|')[0].trim();
             if (generateId(cleanUrl) === targetId) {
-              realUrl = line; // সম্পূর্ণ অরিজিনাল পাইপসহ লিংকটি নেওয়া হলো
+              realUrl = line; // পাইপসহ পুরো অরিজিনাল লাইনটি রিড করবে
               break;
             }
           }
@@ -87,21 +102,20 @@ export async function GET(req: Request) {
     }
 
     if (realUrl) {
-      let finalRedirectUrl = realUrl.trim();
-      
-      // 🎯 আল্টিমেট ফিক্স: পাইপ (|) ক্যারেক্টারকে URL Encode (%7C) করা হলো। 
-      // এতে Next.js ক্র্যাশ করবে না এবং TiviMate/Smarters অ্যাপ ব্যাকগ্রাউন্ডে হেডারটি পার্স করতে পারবে।
-      if (finalRedirectUrl.includes('|')) {
-        const parts = finalRedirectUrl.split('|');
-        finalRedirectUrl = parts[0] + '%7C' + parts.slice(1).join('|');
-      }
-      
-      return NextResponse.redirect(finalRedirectUrl, { status: 302 });
+      // 🚀 আল্টিমেট ট্রিক: Next.js এর কোনো রিডাইরেক্ট মেথড ব্যবহার না করে ডাইরেক্ট নেটিভ রেসপন্স পাঠানো হলো।
+      // এর ফলে পাইপের ভেতরের User-Agent, Cookie, Referer, Origin সব ১০০% অক্ষত অবস্থায় প্লেয়ারের কাছে যাবে।
+      return new Response(null, {
+        status: 302,
+        headers: {
+          "Location": realUrl.trim(),
+          ...corsHeaders
+        }
+      });
     } else {
-      return new Response("Stream Not Found!", { status: 404 });
+      return new Response("Stream Not Found!", { status: 404, headers: corsHeaders });
     }
 
   } catch (error) {
-    return new Response("Server Error", { status: 500 });
+    return new Response("Server Error", { status: 500, headers: corsHeaders });
   }
 }
