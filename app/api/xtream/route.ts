@@ -83,7 +83,7 @@ async function handleRequest(req: Request) {
     }
 
     if (!isPasswordValid) {
-      return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Password" } }, { headers: headers: corsHeaders });
+      return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Password" } }, { headers: corsHeaders });
     }
 
     const now = new Date();
