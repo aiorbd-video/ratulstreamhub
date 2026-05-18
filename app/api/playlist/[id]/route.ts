@@ -9,15 +9,20 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
-    const user = await db.collection("web_users").findOne({ _id: new ObjectId(params.id) });
+    let userId;
+    try { userId = new ObjectId(params.id); } catch (e) {
+      return new Response("#EXTM3U\n#EXTINF:-1, ❌ Invalid User ID\nhttp://error.local", { status: 400 });
+    }
+
+    const user = await db.collection("web_users").findOne({ _id: userId });
 
     if (!user) {
-      return new Response("#EXTM3U\n#EXTINF:-1, ❌ Invalid User\nhttp://error.local", { status: 404 });
+      return new Response("#EXTM3U\n#EXTINF:-1, ❌ User Not Found\nhttp://error.local", { status: 404 });
     }
 
     const now = new Date();
     if (!user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < now)) {
-      return new Response("#EXTM3U\n#EXTINF:-1 tvg-logo=\"https://placehold.co/600x400/000/f00?text=Expired\", 🚫 Subscription Expired! Please Renew.\nhttp://expired.local", {
+      return new Response("#EXTM3U\n#EXTINF:-1 tvg-logo=\"https://placehold.co/600x400/000/f00?text=Expired\", 🚫 Subscription Expired!\nhttp://expired.local", {
         headers: { "Content-Type": "application/vnd.apple.mpegurl" }
       });
     }
@@ -27,19 +32,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const baseUrl = `${protocol}://${host}`;
 
     const streams = await db.collection("posted_streams").find({}).toArray();
-
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 পার্ট ১: ডাটাবেস থেকে আসা লিংকগুলো মাস্কিং করা
+    // 🎯 ডাটাবেস লিংক মাস্কিং
     streams.forEach(stream => {
-      let rawTitle = stream.title || "";
-      let logo = stream.logo || ""; 
-      let group = stream.group || "Live TV"; 
-
-      rawTitle = rawTitle.replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "");
-      rawTitle = rawTitle.replace(/(https?:\/\/[^\s]+)/g, "");
-      let cleanTitle = rawTitle.replace(/^[,-\s]+/, "").trim() || "Live TV";
-
+      let rawTitle = (stream.title || "").replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "").replace(/(https?:\/\/[^\s]+)/g, "").replace(/^[,-\s]+/, "").trim() || "Live TV";
       const url = stream.stream_url;
 
       if (url) {
@@ -55,23 +52,21 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         const encodedUrl = encodeURIComponent(Buffer.from(cleanUrl).toString('base64'));
         const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encodedUrl}${pipeHeaders}`;
         
-        m3uContent += `#EXTINF:-1 tvg-logo="${logo}" group-title="${group}", ${cleanTitle}\n`;
+        m3uContent += `#EXTINF:-1 tvg-logo="${stream.logo || ''}" group-title="${stream.group || 'Live TV'}", ${rawTitle}\n`;
         m3uContent += `${secureUrl}\n`;
       }
     });
 
-    // 🎯 পার্ট ২: অ্যাডমিন প্যানেল থেকে দেওয়া লিংকগুলো লাইন-বাই-লাইন মাস্কিং করা
+    // 🎯 মার্জড M3U (অ্যাডমিন প্যানেল) মাস্কিং
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
       const lines = mergedM3uDoc.content.split('\n');
-      let secureMergedContent = '';
-
       for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
         if (!line) continue;
 
         if (line.startsWith('#')) {
-          secureMergedContent += line + '\n'; // ক্যাটাগরি, লোগো, নাম হুবহু থাকবে
+          m3uContent += line + '\n';
         } else if (line.startsWith('http')) {
           let urlStr = line;
           let pipeHeaders = "";
@@ -84,19 +79,17 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
           const encoded = encodeURIComponent(Buffer.from(urlStr).toString('base64'));
           const secureUrl = `${baseUrl}/api/secure-play/live.m3u8?uid=${user._id}&stream=${encoded}${pipeHeaders}`;
-          
-          secureMergedContent += secureUrl + '\n';
+          m3uContent += secureUrl + '\n';
         } else {
-          secureMergedContent += line + '\n';
+          m3uContent += line + '\n';
         }
       }
-      m3uContent += "\n" + secureMergedContent;
     }
 
     return new Response(m3uContent, {
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
-        "Content-Disposition": `attachment; filename="Reborn_VIP_${user.phone}.m3u"`
+        "Content-Disposition": `attachment; filename="All_In_One_Reborn_${user.phone}.m3u"`
       }
     });
 
