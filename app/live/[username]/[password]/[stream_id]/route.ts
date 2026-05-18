@@ -1,7 +1,7 @@
 // ফাইল পাথ: app/live/[username]/[password]/[stream_id]/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
-import bcrypt from 'bcryptjs'; // 🎯 নতুন যুক্ত করা হলো
+import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,9 +18,9 @@ export async function GET(req: Request, { params }: { params: { username: string
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
+    // ১. ইউজার ভেরিফিকেশন (Bcrypt সহ)
     const user = await db.collection("web_users").findOne({ phone: params.username });
     
-    // 🎯 ম্যাজিক ফিক্স: ভিডিও প্লে করার সময়ও ডিক্রিপ্ট করে মেলাতে হবে
     let isPasswordValid = false;
     if (user) {
       if (user.password) {
@@ -39,7 +39,9 @@ export async function GET(req: Request, { params }: { params: { username: string
       return NextResponse.redirect("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
     }
 
-    const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
+    // 🛡️ ২. অ্যান্টি-শেয়ারিং (IP Lock - মাল্টিপল আইপি ফিক্সড)
+    const forwardedFor = req.headers.get('x-forwarded-for');
+    const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : 'unknown'; // Vercel এর মাল্টিপল IP হ্যান্ডেল করা হলো
     const currentTime = now.getTime();
     
     if (user.activeIp && user.activeIp !== clientIp && (currentTime - (user.lastActiveTime || 0)) < 60000) {
@@ -48,9 +50,11 @@ export async function GET(req: Request, { params }: { params: { username: string
     
     await db.collection("web_users").updateOne({ _id: user._id }, { $set: { activeIp: clientIp, lastActiveTime: currentTime } });
 
+    // ৩. Stream ID এক্সট্রাক্ট করা
     const targetId = parseInt(params.stream_id.replace(/\.(m3u8|ts|mp4)$/, ''));
     let realUrl = "";
 
+    // ডাটাবেস থেকে রিয়েল লিংক খোঁজা
     const streams = await db.collection("posted_streams").find({}).toArray();
     for (const s of streams) {
       if (s.stream_url && generateId(s.stream_url) === targetId) {
@@ -68,7 +72,7 @@ export async function GET(req: Request, { params }: { params: { username: string
           if (line.startsWith('http')) {
             const cleanUrl = line.split('|')[0].trim();
             if (generateId(cleanUrl) === targetId) {
-              realUrl = line; 
+              realUrl = cleanUrl; // 🎯 ম্যাজিক ফিক্স: পুরো লাইন না নিয়ে শুধু ক্লিন ইউআরএলটি নেওয়া হলো!
               break;
             }
           }
@@ -77,7 +81,9 @@ export async function GET(req: Request, { params }: { params: { username: string
     }
 
     if (realUrl) {
-      return NextResponse.redirect(realUrl);
+      // 🎯 ফাইনাল প্রোটেকশন: রিডাইরেক্ট করার আগে ইউআরএল থেকে যেকোনো Pipe বা স্পেস মুছে ক্লিন করা
+      const finalRedirectUrl = realUrl.split('|')[0].trim();
+      return NextResponse.redirect(finalRedirectUrl);
     } else {
       return new Response("Stream Not Found!", { status: 404 });
     }
