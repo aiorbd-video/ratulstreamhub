@@ -1,7 +1,7 @@
-// ফাইল পাথ: app/api/xtream/route.ts
+// 파일 পাথ: app/api/xtream/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
-import bcrypt from 'bcryptjs'; // 🎯 নতুন যুক্ত করা হলো
+import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +30,7 @@ async function handleRequest(req: Request) {
     let password = url.searchParams.get('password');
     let action = url.searchParams.get('action');
 
+    // 🎯 সব ধরনের ডাটা ফরম্যাট (Multipart, JSON, URL-Encoded) রিড করার আল্টিমেট ফিক্স
     if (req.method === 'POST') {
       const contentType = req.headers.get('content-type') || '';
       try {
@@ -38,6 +39,11 @@ async function handleRequest(req: Request) {
           username = (formData.get('username') as string) || username;
           password = (formData.get('password') as string) || password;
           action = (formData.get('action') as string) || action;
+        } else if (contentType.includes('application/json')) {
+          const body = await req.json();
+          username = body.username || username;
+          password = body.password || password;
+          action = body.action || action;
         } else {
           const text = await req.text();
           const params = new URLSearchParams(text);
@@ -48,28 +54,36 @@ async function handleRequest(req: Request) {
       } catch (e) {}
     }
 
+    // 🎯 ম্যাজিক ফিক্স: অ্যাপ থেকে আসা যেকোনো অদৃশ্য স্পেস কেটে সাফ করা (FORCE TRIM)
+    username = username ? username.trim() : '';
+    password = password ? password.trim() : '';
+    action = action ? action.trim() : '';
+
     if (!username || !password) {
-      return NextResponse.json({ user_info: { auth: 0 } }, { headers: corsHeaders });
+      return NextResponse.json({ user_info: { auth: 0, status: "Missing Username or Password" } }, { headers: corsHeaders });
     }
 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
+    
+    // ডাটাবেস থেকে ইউজার খোঁজা
     const user = await db.collection("web_users").findOne({ phone: username });
 
-    // 🎯 ম্যাজিক ফিক্স: Bcrypt ডিক্রিপশন দিয়ে পাসওয়ার্ড চেক করা
-    let isPasswordValid = false;
-    if (user) {
-      if (user.password) {
-        // ডাটাবেসের হ্যাশ পাসওয়ার্ডের সাথে ইউজারের টাইপ করা পাসওয়ার্ড মেলাবে
-        isPasswordValid = await bcrypt.compare(password, user.password);
-      } else {
-        // পাসওয়ার্ড সেট না থাকলে নাম্বার দিয়ে মেলাবে
-        isPasswordValid = (password === username);
-      }
+    // 🎯 নিখুঁত ট্র্যাকিং এর জন্য স্ট্যাটাস মেসেজ আপডেট করা হলো
+    if (!user) {
+      return NextResponse.json({ user_info: { auth: 0, status: "User not found in database" } }, { headers: corsHeaders });
     }
 
-    if (!user || !isPasswordValid) {
-      return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Details" } }, { headers: corsHeaders });
+    // Bcrypt পাসওয়ার্ড ভেরিফিকেশন
+    let isPasswordValid = false;
+    if (user.password) {
+      isPasswordValid = await bcrypt.compare(password, user.password);
+    } else {
+      isPasswordValid = (password === username);
+    }
+
+    if (!isPasswordValid) {
+      return NextResponse.json({ user_info: { auth: 0, status: "Incorrect Password" } }, { headers: headers: corsHeaders });
     }
 
     const now = new Date();
