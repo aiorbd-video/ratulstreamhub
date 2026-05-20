@@ -19,7 +19,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🚫 ব্রাউজার ডাউনলোডার ব্লক (আগের সিকিউরিটি)
+    // 🚫 ব্রাউজার হ্যাকার ব্লক
     const isBrowser = userAgent.includes('mozilla') && 
                       (userAgent.includes('chrome') || userAgent.includes('safari') || userAgent.includes('firefox') || userAgent.includes('edge')) && 
                       !userAgent.includes('tv') && 
@@ -49,71 +49,96 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       });
     }
 
-    const streams = await db.collection("posted_streams").find({}).toArray();
-    let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
+    // 🎯 ১. সব ডাটা এক জায়গায় আনা হচ্ছে (Raw Text Collection)
+    let rawM3uText = "";
 
-    // 🎯 ডাটাবেস স্ট্রিম পার্সিং
+    const streams = await db.collection("posted_streams").find({}).toArray();
     streams.forEach(stream => {
       let rawTitle = (stream.title || "").replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "").replace(/(https?:\/\/[^\s]+)/g, "").replace(/^[,-\s]+/, "").trim() || "Live TV";
+      rawM3uText += `#EXTINF:-1 tvg-logo="${stream.logo || ''}" group-title="${stream.group || 'Live TV'}", ${rawTitle}\n`;
       if (stream.stream_url) {
-        m3uContent += `#EXTINF:-1 tvg-logo="${stream.logo || ''}" group-title="${stream.group || 'Live TV'}", ${rawTitle}\n`;
-        m3uContent += `${stream.stream_url.replace(/[\r\n\s]+/g, "").trim()}\n`;
+        rawM3uText += `${stream.stream_url.trim()}\n`;
       }
     });
 
-    // 🚀 স্মার্ট অটো-কনভার্টার: OTT Navigator ট্যাগগুলোকে গ্লোবাল Pipe (|) ফরম্যাটে রূপান্তর
     const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" });
     if (mergedM3uDoc && mergedM3uDoc.content) {
-      const lines = mergedM3uDoc.content.split(/\r?\n/);
-      let tempHeaders: any = {};
+      rawM3uText += `${mergedM3uDoc.content}\n`;
+    }
 
-      for (let i = 0; i < lines.length; i++) {
-        let line = lines[i].trim();
-        if (!line) continue;
+    // 🚀 ২. আল্টিমেট অটো-কনভার্টার (Pipe Format Generator)
+    let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
+    const lines = rawM3uText.split(/\r?\n/);
+    
+    let tempHeaders: any = {};
+    let currentExtInf = "";
 
-        if (line.startsWith('#EXTINF')) {
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i].trim();
+      if (!line || line.startsWith('#EXTM3U')) continue;
+
+      if (line.startsWith('#EXTINF')) {
+        // যদি আগের কোনো #EXTINF থাকে যার লিংক পাওয়া যায়নি, সেটা প্রিন্ট করে ক্লিয়ার করা
+        if (currentExtInf) m3uContent += `${currentExtInf}\n`;
+        currentExtInf = line;
+      } 
+      else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
+        tempHeaders['User-Agent'] = line.substring(27).trim();
+      } 
+      else if (line.startsWith('#EXTVLCOPT:http-referer=') || line.startsWith('#EXTVLCOPT:http-referrer=')) {
+        // 🎯 স্পেলিং মিসটেক ফিক্স: referrer (ডাবল r) এবং referer দুটোই কাজ করবে
+        const prefixLen = line.indexOf('=') + 1;
+        tempHeaders['Referer'] = line.substring(prefixLen).trim();
+      } 
+      else if (line.startsWith('#EXTHTTP:')) {
+        // 🎯 JSON হেডার ফিক্স: Toffee বা অন্যান্য কুকি রিকোয়েস্ট
+        try {
+          let jsonStr = line.substring(9);
+          let parsed = JSON.parse(jsonStr);
+          if (parsed.cookie || parsed.Cookie) tempHeaders['Cookie'] = parsed.cookie || parsed.Cookie;
+          if (parsed.Origin || parsed.origin) tempHeaders['Origin'] = parsed.Origin || parsed.origin;
+          if (parsed.Referer || parsed.referer || parsed.referrer || parsed.Referrer) {
+            tempHeaders['Referer'] = parsed.Referer || parsed.referer || parsed.referrer || parsed.Referrer;
+          }
+          if (parsed['User-Agent'] || parsed['user-agent']) {
+            tempHeaders['User-Agent'] = parsed['User-Agent'] || parsed['user-agent'];
+          }
+        } catch(e){}
+      } 
+      else if (line.startsWith('http')) {
+        let fullUrl = line.replace(/[\r\n\s]+/g, "").trim();
+
+        // 🎯 ম্যাজিক: পাইপ জোড়া লাগানো হচ্ছে
+        if (!fullUrl.includes('|') && Object.keys(tempHeaders).length > 0) {
+          let pipeStr = "";
+          for (const [key, val] of Object.entries(tempHeaders)) {
+            pipeStr += `${pipeStr ? '&' : '|'}${key}=${val}`;
+          }
+          fullUrl += pipeStr;
+        }
+
+        if (currentExtInf) {
+          m3uContent += `${currentExtInf}\n`;
+          currentExtInf = ""; // প্রিন্ট করার পর রিসেট
+        }
+        m3uContent += `${fullUrl}\n`;
+        tempHeaders = {}; // লিংক বসানোর পর টেম্পোরারি হেডার ক্লিয়ার
+      } 
+      else {
+        // অন্য কোনো অজানা ট্যাগ থাকলে
+        if (!line.startsWith('#EXTVLCOPT') && !line.startsWith('#EXTHTTP')) {
+          if (currentExtInf) {
+            m3uContent += `${currentExtInf}\n`;
+            currentExtInf = "";
+          }
           m3uContent += `${line}\n`;
-        } 
-        // User-Agent এবং Referer ধরা হচ্ছে
-        else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
-          tempHeaders['User-Agent'] = line.substring(27).trim();
-        } 
-        else if (line.startsWith('#EXTVLCOPT:http-referer=')) {
-          tempHeaders['Referer'] = line.substring(24).trim();
-        } 
-        // JSON Cookie ধরা হচ্ছে
-        else if (line.startsWith('#EXTHTTP:')) {
-          try {
-            let jsonStr = line.substring(9);
-            let parsed = JSON.parse(jsonStr);
-            if (parsed.cookie || parsed.Cookie) tempHeaders['Cookie'] = parsed.cookie || parsed.Cookie;
-            if (parsed.Origin || parsed.origin) tempHeaders['Origin'] = parsed.Origin || parsed.origin;
-            if (parsed.Referer || parsed.referer) tempHeaders['Referer'] = parsed.Referer || parsed.referer;
-          } catch(e){}
-        } 
-        // লিংক এবং Pipe অ্যাটাচমেন্ট
-        else if (line.startsWith('http')) {
-          let fullUrl = line.replace(/[\r\n\s]+/g, "").trim();
-
-          // 🎯 ম্যাজিক: যদি লিংকে আগে থেকে Pipe না থাকে এবং আমরা ট্যাগ থেকে হেডার পেয়ে থাকি
-          if (!fullUrl.includes('|') && Object.keys(tempHeaders).length > 0) {
-            let pipeStr = "";
-            for (const [key, val] of Object.entries(tempHeaders)) {
-              pipeStr += `${pipeStr ? '&' : '|'}${key}=${val}`;
-            }
-            fullUrl += pipeStr; // লিংকের শেষে হেডারগুলো জুড়ে দেওয়া হলো
-          }
-
-          m3uContent += `${fullUrl}\n`;
-          tempHeaders = {}; // পরের লিংকের জন্য টেম্পোরারি হেডার ক্লিয়ার
-        } 
-        else {
-          // অন্য কোনো অজানা ট্যাগ থাকলে সেটা রেখে দেবে, শুধু VLC/HTTP ট্যাগগুলো সরাবে
-          if (!line.startsWith('#EXTVLCOPT') && !line.startsWith('#EXTHTTP')) {
-            m3uContent += `${line}\n`;
-          }
         }
       }
+    }
+
+    // লুপের শেষে যদি কোনো #EXTINF বাকি থাকে
+    if (currentExtInf) {
+      m3uContent += `${currentExtInf}\n`;
     }
 
     return new Response(m3uContent, {
