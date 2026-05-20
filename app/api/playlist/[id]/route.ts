@@ -4,7 +4,6 @@ import { ObjectId } from 'mongodb';
 
 export const dynamic = 'force-dynamic';
 
-// 🛡️ কড়া CORS ও ক্যাশ পলিসি
 const securityHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -22,20 +21,21 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🚫 ১. সুপার স্ট্রিক্ট অ্যাপ লক (Televizo Exclusive)
-    // TiviMate, Smarters, VLC, এবং সব ব্রাউজার সরাসরি ব্লক হবে!
-    const isTelevizo = userAgent.includes('televizo') || userAgent.includes('exoplayer');
-    const isBlockedApp = userAgent.includes('tivimate') || userAgent.includes('smarters') || userAgent.includes('vlc');
-    const isBrowser = userAgent.includes('mozilla') && !userAgent.includes('tv');
+    // 🚫 ব্রাউজার হ্যাকার ব্লক: পিসি বা মোবাইলের ব্রাউজার থেকে লিংক চুরি সম্পূর্ণ বন্ধ!
+    // কিন্তু Televizo (যার User-Agent অনেক সময় ফাঁকা বা okhttp থাকে) তাকে অ্যালাউ করা হবে।
+    const isBrowser = userAgent.includes('mozilla') && 
+                      (userAgent.includes('chrome') || userAgent.includes('safari') || userAgent.includes('firefox') || userAgent.includes('edge')) && 
+                      !userAgent.includes('tv') && 
+                      !userAgent.includes('smarters') && 
+                      !userAgent.includes('iptv');
 
-    if (!isTelevizo || isBlockedApp || isBrowser) {
-      return new Response("🚫 Access Denied! This premium playlist is strictly locked. You can ONLY open this inside the 'Televizo' IPTV application.", { 
+    if (isBrowser) {
+      return new Response("🚫 Access Denied! This premium playlist is strictly locked. Please use an IPTV application like Televizo.", { 
         status: 403, 
         headers: { "Content-Type": "text/plain", ...securityHeaders } 
       });
     }
 
-    // 🗄️ ২. ডাটাবেস কানেকশন
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
@@ -58,7 +58,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       });
     }
 
-    // 🎯 ৩. ডাটা ফেচিং
     const [streams, mergedM3uDoc] = await Promise.all([
       db.collection("posted_streams").find({}, { projection: { title: 1, group: 1, logo: 1, stream_url: 1 } }).toArray(),
       db.collection("system_settings").findOne({ key: "merged_premium_m3u" }, { projection: { content: 1 } })
@@ -77,7 +76,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       rawM3uText += `${mergedM3uDoc.content}\n`;
     }
 
-    // 🚀 ৪. Televizo অপটিমাইজড পার্সার (Native VLCOPT Builder)
+    // 🚀 Televizo অপটিমাইজড পার্সার (Native VLCOPT Builder)
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
     const lines = rawM3uText.split(/\r?\n/);
     
@@ -114,7 +113,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       else if (line.startsWith('http')) {
         let fullUrl = line.replace(/[\r\n\s]+/g, "").trim();
 
-        // পাইপ থেকে হেডার আলাদা করে Televizo ফরমেটে আনা হচ্ছে
         if (fullUrl.includes('|')) {
           const parts = fullUrl.split('|');
           fullUrl = parts[0];
@@ -130,7 +128,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           currentExtInf = ""; 
         }
 
-        // 🎯 Televizo এর পছন্দের স্টাইল: URL এর ঠিক আগে #EXTVLCOPT বসবে
+        // 🎯 Televizo এর পছন্দের স্টাইল
         if (tempHeaders['User-Agent']) {
           m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['User-Agent']}\n`;
         }
@@ -138,7 +136,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           m3uContent += `#EXTVLCOPT:http-referrer=${tempHeaders['Referer']}\n`;
         }
         
-        // Televizo কুকি এবং অন্যান্য হেডার Pipe এ সাপোর্ট করে, তাই ওগুলো লিংকেই থাকবে
         let extraPipes = "";
         for (const [key, val] of Object.entries(tempHeaders)) {
           if (key !== 'User-Agent' && key !== 'Referer') {
