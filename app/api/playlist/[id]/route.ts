@@ -21,7 +21,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🚫 ব্রাউজার হ্যাকার ব্লক (সিকিউরিটি অক্ষুণ্ন রাখা হলো)
+    // 🚫 সিকিউরিটি: ব্রাউজার থেকে লিকেজ বন্ধ
     const isBrowser = userAgent.includes('mozilla') && 
                       (userAgent.includes('chrome') || userAgent.includes('safari') || userAgent.includes('firefox') || userAgent.includes('edge')) && 
                       !userAgent.includes('tv') && 
@@ -48,7 +48,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       { projection: { isPremium: 1, premiumExpiry: 1, phone: 1 } }
     );
 
-    // 🎯 ডাটাবেস থেকে ইউজারের মেয়াদ যাচাই (মেয়াদ শেষ হলে প্লেলিস্ট অফ হয়ে যাবে)
+    // 🎯 অ্যাকাউন্ট মেয়াদ চেক
     if (!user || !user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < new Date())) {
       return new Response("#EXTM3U\n#EXTINF:-1, 🚫 Subscription Expired!\nhttp://expired.local", {
         status: 403,
@@ -74,17 +74,31 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       rawM3uText += `${mergedM3uDoc.content}\n`;
     }
 
-    // 🚀 Televizo native parser engine
+    // 🚀 THE ULTIMATE SANITIZER (যেকোনো জঞ্জাল লিংক ফিক্স করার ম্যাজিক)
+    let sanitizedText = rawM3uText
+      // ১. ট্যাগগুলোর আগে জোর করে নিউলাইন বসানো
+      .replace(/(#EXTINF)/gi, "\n$1")
+      .replace(/(#EXTVLCOPT)/gi, "\n$1")
+      .replace(/(#EXTHTTP)/gi, "\n$1")
+      // ২. যদি হ্যাশ (#) ছাড়া EXTVLCOPT থাকে, তবে সেটা ফিক্স করা
+      .replace(/(^|[^\w#])(EXTVLCOPT|EXTHTTP)/gi, "$1\n#$2")
+      // ৩. সবচেয়ে বড় ফিক্স: Referer লিংকের সাথে মেইন লিংক জোড়া লেগে থাকলে (যেমন: com/https://) সেটাকে দুই লাইনে ভেঙে দেওয়া
+      .replace(/([^"'\s=])(https?:\/\/)/gi, "$1\n$2")
+      // ৪. অতিরিক্ত ফাঁকা লাইন রিমুভ করা
+      .replace(/\n+/g, "\n");
+
+
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
 
-    // 🎯 ম্যাজিক: প্লেলিস্টের সবার উপরে ইউজারের মেয়াদ দেখানোর জন্য একটি ডামি চ্যানেল
+    // ⭐ VIP Account Expiry Header
     const expText = user.premiumExpiry 
       ? new Date(user.premiumExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) 
       : "Unlimited (Lifetime)";
     m3uContent += `#EXTINF:-1 tvg-logo="https://cdn-icons-png.flaticon.com/512/2740/2740600.png" group-title="⭐ Account Info", 👤 VIP Status | Expiry: ${expText}\n`;
     m3uContent += `http://local.info/account\n`;
 
-    const lines = rawM3uText.split(/\r?\n/);
+    // 🚀 THE ULTIMATE PARSER ENGINE (All Headers Supported)
+    const lines = sanitizedText.split(/\r?\n/);
     
     let tempHeaders: Record<string, string> = {};
     let currentExtInf = "";
@@ -97,29 +111,37 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         if (currentExtInf) m3uContent += `${currentExtInf}\n`;
         currentExtInf = line;
       } 
-      else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
-        tempHeaders['User-Agent'] = line.substring(27).trim();
+      else if (line.toUpperCase().startsWith('#EXTVLCOPT')) {
+        // 🎯 EXTVLCOPT এর ভেতর থেকে কুকি, রেফারের, অরিজিন বের করে আনা
+        const splitIdx = line.indexOf('=');
+        if (splitIdx > -1) {
+          const keyPart = line.substring(0, splitIdx).toLowerCase();
+          const valPart = line.substring(splitIdx + 1).trim();
+          
+          if (keyPart.includes('user-agent')) tempHeaders['User-Agent'] = valPart;
+          else if (keyPart.includes('referer') || keyPart.includes('referrer')) tempHeaders['Referer'] = valPart;
+          else if (keyPart.includes('cookie')) tempHeaders['Cookie'] = valPart;
+          else if (keyPart.includes('origin')) tempHeaders['Origin'] = valPart;
+        }
       } 
-      else if (line.startsWith('#EXTVLCOPT:http-referer=') || line.startsWith('#EXTVLCOPT:http-referrer=')) {
-        tempHeaders['Referer'] = line.substring(line.indexOf('=') + 1).trim();
-      } 
-      else if (line.startsWith('#EXTHTTP:')) {
+      else if (line.toUpperCase().startsWith('#EXTHTTP')) {
+        // 🎯 JSON ফরম্যাটে কুকি বা হেডার থাকলে তা পার্স করা
         try {
-          const parsed = JSON.parse(line.substring(9));
-          if (parsed.cookie || parsed.Cookie) tempHeaders['Cookie'] = parsed.cookie || parsed.Cookie;
-          if (parsed.Origin || parsed.origin) tempHeaders['Origin'] = parsed.Origin || parsed.origin;
-          if (parsed.Referer || parsed.referer || parsed.referrer || parsed.Referrer) {
-            tempHeaders['Referer'] = parsed.Referer || parsed.referer || parsed.referrer || parsed.Referrer;
-          }
-          if (parsed['User-Agent'] || parsed['user-agent']) {
-            tempHeaders['User-Agent'] = parsed['User-Agent'] || parsed['user-agent'];
+          const jsonStr = line.substring(line.indexOf(':') + 1).trim();
+          const parsed = JSON.parse(jsonStr);
+          for (const key in parsed) {
+            const lk = key.toLowerCase();
+            if (lk === 'cookie') tempHeaders['Cookie'] = parsed[key];
+            else if (lk === 'referer' || lk === 'referrer') tempHeaders['Referer'] = parsed[key];
+            else if (lk === 'origin') tempHeaders['Origin'] = parsed[key];
+            else if (lk === 'user-agent') tempHeaders['User-Agent'] = parsed[key];
           }
         } catch(e) {}
       } 
       else if (line.startsWith('http')) {
-        let fullUrl = line.replace(/[\r\n\s]+/g, "").trim();
+        let fullUrl = line;
 
-        // 🎯 যদি ইনপুট লিংকে আগে থেকেই Pipe (|) ফরমেটে হেডার থাকে, ওটাকেও খুলে আলাদা করা হচ্ছে
+        // 🎯 পাইপ (|) ফরম্যাটে হেডার থাকলে তা ভেঙে বের করা
         if (fullUrl.includes('|')) {
           const parts = fullUrl.split('|');
           fullUrl = parts[0].trim();
@@ -128,45 +150,37 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             for (const pair of headerPairs) {
               const equalIndex = pair.indexOf('=');
               if (equalIndex > 0) {
-                const key = pair.substring(0, equalIndex).trim();
+                const key = pair.substring(0, equalIndex).trim().toLowerCase();
                 const val = pair.substring(equalIndex + 1).trim();
-                if (key.toLowerCase() === 'cookie') tempHeaders['Cookie'] = val;
-                else if (key.toLowerCase() === 'user-agent') tempHeaders['User-Agent'] = val;
-                else if (key.toLowerCase() === 'referer' || key.toLowerCase() === 'referrer') tempHeaders['Referer'] = val;
-                else if (key.toLowerCase() === 'origin') tempHeaders['Origin'] = val;
+                if (key === 'cookie') tempHeaders['Cookie'] = val;
+                else if (key === 'user-agent') tempHeaders['User-Agent'] = val;
+                else if (key === 'referer' || key === 'referrer') tempHeaders['Referer'] = val;
+                else if (key === 'origin') tempHeaders['Origin'] = val;
               }
             }
           }
         }
 
-        // #EXTINF রাইট করা হচ্ছে
+        // #EXTINF লাইনে রাইট করা
         if (currentExtInf) {
           m3uContent += `${currentExtInf}\n`;
           currentExtInf = ""; 
         }
 
-        // 🎯 Televizo-র জন্য ১টি লিংকের বিপরীতে আলাদা আলাদা লাইনে EXTVLCOPT রাইট করা হচ্ছে
-        if (tempHeaders['User-Agent']) {
-          m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['User-Agent']}\n`;
-        }
-        if (tempHeaders['Referer']) {
-          m3uContent += `#EXTVLCOPT:http-referrer=${tempHeaders['Referer']}\n`;
-        }
-        if (tempHeaders['Cookie']) {
-          // ⚠️ Toffee-র মাল্টিপল '=' যুক্ত কুকি এখানে একদম র (Raw) অবস্থায় নিখুঁতভাবে বসবে
-          m3uContent += `#EXTVLCOPT:http-cookie=${tempHeaders['Cookie']}\n`;
-        }
-        if (tempHeaders['Origin']) {
-          m3uContent += `#EXTVLCOPT:http-origin=${tempHeaders['Origin']}\n`;
-        }
+        // 🚀 THE FINAL ASSEMBLY (সব হেডারকে নিখুঁত Televizo ফরম্যাটে সাজানো)
+        if (tempHeaders['User-Agent']) m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['User-Agent']}\n`;
+        if (tempHeaders['Referer']) m3uContent += `#EXTVLCOPT:http-referrer=${tempHeaders['Referer']}\n`;
+        if (tempHeaders['Origin']) m3uContent += `#EXTVLCOPT:http-origin=${tempHeaders['Origin']}\n`;
+        if (tempHeaders['Cookie']) m3uContent += `#EXTVLCOPT:http-cookie=${tempHeaders['Cookie']}\n`;
         
-        // 🚀 ফাইনাল ম্যাজিক: লিংকটি থাকবে একদম ফ্রেশ ও অরিজিনাল (কোনো পাইপ সাইন ছাড়া)
+        // একদম ফ্রেশ ভিডিও লিংক (কোনো জঞ্জাল ছাড়া)
         m3uContent += `${fullUrl}\n`;
         
-        // হেডার বাকেট রিসেট
+        // পরের লিংকের জন্য বাকেট খালি করা
         tempHeaders = {}; 
       } 
-      else if (!line.startsWith('#EXTVLCOPT') && !line.startsWith('#EXTHTTP')) {
+      else {
+        // অজানা কোনো ট্যাগ থাকলে
         if (currentExtInf) {
           m3uContent += `${currentExtInf}\n`;
           currentExtInf = "";
