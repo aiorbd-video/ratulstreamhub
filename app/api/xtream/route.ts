@@ -5,14 +5,13 @@ import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 
-// 🚀 স্মার্ট নিউমেরিক আইডি মেকার (Televizo-এর জন্য ১০০% সংখ্যা তৈরি করবে)
 function getNumericId(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash |= 0; // ৩২-বিট ইন্টিজারে রূপান্তর
+    hash |= 0;
   }
-  return Math.abs(hash) || 1; 
+  return Math.abs(hash) || 1;
 }
 
 let STREAM_CACHE: any[] | null = null;
@@ -53,7 +52,10 @@ async function handleXtreamRequest(req: Request) {
       } catch (e) {}
     }
 
-    if (!username || !password) return NextResponse.json({ message: "Missing credentials" }, { status: 400, headers: corsHeaders });
+    // 🎯 Missing Credentials হলে 400 এর বদলে 200 স্ট্যাটাস দিয়ে auth:0 পাঠাতে হবে, নইলে Televizo ক্র্যাশ করে
+    if (!username || !password) {
+      return NextResponse.json({ user_info: { auth: 0, status: "Not Authorized" } }, { headers: corsHeaders });
+    }
 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
@@ -103,15 +105,20 @@ async function handleXtreamRequest(req: Request) {
         const numericCatId = getNumericId(groupName).toString();
         categoriesMap.set(numericCatId, groupName);
         
+        // 🚀 CRITICAL FIX: অফিসিয়াল স্কিমা বসানো হলো
         processedStreams.push({
           num: globalIdCounter++,
           name: stream.title || "Live TV",
-          stream_id: getNumericId(stream._id.toString()), // 🎯 খাঁটি সংখ্যা (Televizo Fix)
+          stream_type: "live", // 🎯 Televizo এই লাইনটি ছাড়া চ্যানেল রিড করে না!
+          stream_id: getNumericId(stream._id.toString()), 
           stream_icon: stream.logo || "",
-          category_id: numericCatId, // 🎯 খাঁটি সংখ্যার স্ট্রিং
-          container_extension: "m3u8",
+          epg_channel_id: null, 
+          added: Math.floor(now / 1000).toString(),
+          category_id: numericCatId, 
           custom_sid: "",
-          tv_archive: 0
+          tv_archive: 0,
+          direct_source: "",
+          tv_archive_duration: 0
         });
       });
 
@@ -134,15 +141,20 @@ async function handleXtreamRequest(req: Request) {
             const numericCatId = getNumericId(currentGroup).toString();
             categoriesMap.set(numericCatId, currentGroup);
             
+            // 🚀 CRITICAL FIX: অফিসিয়াল স্কিমা বসানো হলো
             processedStreams.push({
               num: globalIdCounter++,
               name: currentTitle,
-              stream_id: getNumericId(line), // 🎯 লিংক থেকে খাঁটি সংখ্যা
+              stream_type: "live", // 🎯 Televizo Fix
+              stream_id: getNumericId(line), 
               stream_icon: currentLogo,
+              epg_channel_id: null,
+              added: Math.floor(now / 1000).toString(),
               category_id: numericCatId,
-              container_extension: "m3u8",
               custom_sid: "",
-              tv_archive: 0
+              tv_archive: 0,
+              direct_source: "",
+              tv_archive_duration: 0
             });
           }
         }
@@ -151,7 +163,7 @@ async function handleXtreamRequest(req: Request) {
       if (processedStreams.length === 0) {
         categoriesMap.set("1", "Welcome");
         processedStreams.push({
-          num: 1, name: "No Channels Available", stream_id: 100, stream_icon: "", category_id: "1", container_extension: "m3u8", custom_sid: "", tv_archive: 0
+          num: 1, name: "No Channels Available", stream_type: "live", stream_id: 100, stream_icon: "", epg_channel_id: null, added: "0", category_id: "1", custom_sid: "", tv_archive: 0, direct_source: "", tv_archive_duration: 0
         });
       }
 
@@ -169,20 +181,42 @@ async function handleXtreamRequest(req: Request) {
     const host = req.headers.get('host') || 'localhost';
     const protocol = req.headers.get('x-forwarded-proto') || 'https';
 
+    // 🚀 লগইন এর রেসপন্সেও অফিসিয়াল স্কিমা ফলো করা হয়েছে
     if (!action) {
       return NextResponse.json({
         user_info: {
-          username: username, password: password, auth: 1, status: "Active", exp_date: "1799345858", is_trial: "0", active_cons: "0", max_connections: "2"
+          username: username, 
+          password: password, 
+          message: "Logged In Successfully",
+          auth: 1, 
+          status: "Active", 
+          exp_date: "1799345858", 
+          is_trial: "0", 
+          active_cons: "0",
+          created_at: Math.floor(now / 1000).toString(),
+          max_connections: "2",
+          allowed_output_formats: ["m3u8", "ts", "rtmp"]
         },
         server_info: {
-          url: host, port: "80", https_port: "443", server_protocol: protocol, rtmp_port: "80", timezone: "Asia/Dhaka"
+          url: host, 
+          port: protocol === 'https' ? "443" : "80", 
+          https_port: "443", 
+          server_protocol: protocol, 
+          rtmp_port: "8080", 
+          timezone: "Asia/Dhaka",
+          timestamp_now: Math.floor(now / 1000),
+          time_now: new Date().toISOString()
         }
       }, { headers: corsHeaders });
     }
 
     if (action === 'get_live_categories') return NextResponse.json(CATEGORY_CACHE, { headers: corsHeaders });
     if (action === 'get_live_streams') return NextResponse.json(STREAM_CACHE, { headers: corsHeaders });
-    if (action === 'get_vod_categories' || action === 'get_series_categories' || action === 'get_vod_streams' || action === 'get_series') return NextResponse.json([], { headers: corsHeaders });
+    
+    // 🎯 VOD ও Series এর জন্য ফাঁকা স্কিমা (না হলে প্লেয়ার ক্র্যাশ করবে)
+    if (action === 'get_vod_categories' || action === 'get_series_categories' || action === 'get_vod_streams' || action === 'get_series') {
+      return NextResponse.json([], { headers: corsHeaders });
+    }
 
     return NextResponse.json({ message: "Action not supported" }, { status: 400, headers: corsHeaders });
   } catch (error) {
