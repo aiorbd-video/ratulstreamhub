@@ -5,7 +5,16 @@ import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 
-// 🚀 এন্টারপ্রাইজ মেমোরি ক্যাশ
+// 🚀 স্মার্ট নিউমেরিক আইডি মেকার (Televizo-এর জন্য ১০০% সংখ্যা তৈরি করবে)
+function getNumericId(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0; // ৩২-বিট ইন্টিজারে রূপান্তর
+  }
+  return Math.abs(hash) || 1; 
+}
+
 let STREAM_CACHE: any[] | null = null;
 let CATEGORY_CACHE: any[] | null = null;
 let CACHE_TIME = 0;
@@ -18,11 +27,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "*",
 };
 
-export async function OPTIONS() {
-  return new Response(null, { headers: corsHeaders });
-}
+export async function OPTIONS() { return new Response(null, { headers: corsHeaders }); }
 
-// 🎯 GET ও POST উভয়ের জন্য একটি কমন হ্যান্ডেলার
 async function handleXtreamRequest(req: Request) {
   try {
     const url = new URL(req.url);
@@ -30,7 +36,6 @@ async function handleXtreamRequest(req: Request) {
     let password = url.searchParams.get('password') || ''; 
     let action = url.searchParams.get('action') || '';
 
-    // 🚀 ১. ম্যাজিক ফিক্স: প্লেয়ার যদি POST বডিতে ডাটা লুকিয়ে পাঠায়, তবে তা বের করা হবে
     if (req.method === 'POST') {
       try {
         const contentType = req.headers.get('content-type') || '';
@@ -45,20 +50,15 @@ async function handleXtreamRequest(req: Request) {
           if (body.password) password = body.password;
           if (body.action) action = body.action;
         }
-      } catch (e) {
-        // বডি পার্সিং ফেইল করলে ইগনোর করবে
-      }
+      } catch (e) {}
     }
 
-    if (!username || !password) {
-      return NextResponse.json({ message: "Missing credentials" }, { status: 400, headers: corsHeaders });
-    }
+    if (!username || !password) return NextResponse.json({ message: "Missing credentials" }, { status: 400, headers: corsHeaders });
 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
     const now = Date.now();
 
-    // 🔐 ২. স্মার্ট অথেনটিকেশন চেক
     const cacheKey = `${username}_${password}`;
     let isUserValid = false;
 
@@ -86,30 +86,29 @@ async function handleXtreamRequest(req: Request) {
       };
     }
 
-    if (!isUserValid) {
-      return NextResponse.json({ user_info: { auth: 0, status: "Not Authorized" } }, { headers: corsHeaders });
-    }
+    if (!isUserValid) return NextResponse.json({ user_info: { auth: 0, status: "Not Authorized" } }, { headers: corsHeaders });
 
-    // 🎯 ৩. মেমোরি ক্যাশ আপডেট (ডাটাবেস অপটিমাইজেশন)
     if (!STREAM_CACHE || !CATEGORY_CACHE || (now - CACHE_TIME) > CACHE_TTL) {
       const [streams, mergedM3uDoc] = await Promise.all([
         db.collection("posted_streams").find({}, { projection: { title: 1, group: 1, logo: 1, stream_url: 1 } }).toArray(),
         db.collection("system_settings").findOne({ key: "merged_premium_m3u" }, { projection: { content: 1 } })
       ]);
 
-      const categoriesMap = new Set<string>();
+      const categoriesMap = new Map<string, string>();
       const processedStreams: any[] = [];
-      let globalIdCounter = 1000;
+      let globalIdCounter = 1;
 
       streams.forEach((stream) => {
         const groupName = stream.group || "Live TV";
-        categoriesMap.add(groupName);
+        const numericCatId = getNumericId(groupName).toString();
+        categoriesMap.set(numericCatId, groupName);
+        
         processedStreams.push({
           num: globalIdCounter++,
           name: stream.title || "Live TV",
-          stream_id: stream._id.toString(),
+          stream_id: getNumericId(stream._id.toString()), // 🎯 খাঁটি সংখ্যা (Televizo Fix)
           stream_icon: stream.logo || "",
-          category_id: Buffer.from(groupName).toString('base64').substring(0, 8),
+          category_id: numericCatId, // 🎯 খাঁটি সংখ্যার স্ট্রিং
           container_extension: "m3u8",
           custom_sid: "",
           tv_archive: 0
@@ -131,14 +130,16 @@ async function handleXtreamRequest(req: Request) {
             currentLogo = logoMatch ? logoMatch[1] : "";
             const titleParts = line.split(',');
             currentTitle = titleParts[titleParts.length - 1].trim();
-            categoriesMap.add(currentGroup);
           } else if (line.startsWith('http')) {
+            const numericCatId = getNumericId(currentGroup).toString();
+            categoriesMap.set(numericCatId, currentGroup);
+            
             processedStreams.push({
               num: globalIdCounter++,
               name: currentTitle,
-              stream_id: Buffer.from(line).toString('base64').substring(0, 12),
+              stream_id: getNumericId(line), // 🎯 লিংক থেকে খাঁটি সংখ্যা
               stream_icon: currentLogo,
-              category_id: Buffer.from(currentGroup).toString('base64').substring(0, 8),
+              category_id: numericCatId,
               container_extension: "m3u8",
               custom_sid: "",
               tv_archive: 0
@@ -147,23 +148,15 @@ async function handleXtreamRequest(req: Request) {
         }
       }
 
-      // ⚠️ যদি আপনার সার্ভারে কোনো চ্যানেল না থাকে, তবে একটি ডামি চ্যানেল দেওয়া হবে। নইলে প্লেয়ার ক্র্যাশ করবে!
       if (processedStreams.length === 0) {
-        categoriesMap.add("Welcome");
+        categoriesMap.set("1", "Welcome");
         processedStreams.push({
-          num: 1,
-          name: "No Channels Available",
-          stream_id: "dummy_stream",
-          stream_icon: "",
-          category_id: Buffer.from("Welcome").toString('base64').substring(0, 8),
-          container_extension: "m3u8",
-          custom_sid: "",
-          tv_archive: 0
+          num: 1, name: "No Channels Available", stream_id: 100, stream_icon: "", category_id: "1", container_extension: "m3u8", custom_sid: "", tv_archive: 0
         });
       }
 
-      const processedCategories = Array.from(categoriesMap).map((catName) => ({
-        category_id: Buffer.from(catName).toString('base64').substring(0, 8),
+      const processedCategories = Array.from(categoriesMap.entries()).map(([catId, catName]) => ({
+        category_id: catId,
         category_name: catName,
         parent_id: 0
       }));
@@ -176,43 +169,23 @@ async function handleXtreamRequest(req: Request) {
     const host = req.headers.get('host') || 'localhost';
     const protocol = req.headers.get('x-forwarded-proto') || 'https';
 
-    // ১. লগইন হ্যান্ডেলার
     if (!action) {
       return NextResponse.json({
         user_info: {
-          username: username,
-          password: password,
-          auth: 1,
-          status: "Active",
-          exp_date: "1799345858", 
-          is_trial: "0",
-          active_cons: "0",
-          max_connections: "2"
+          username: username, password: password, auth: 1, status: "Active", exp_date: "1799345858", is_trial: "0", active_cons: "0", max_connections: "2"
         },
         server_info: {
-          url: host,
-          port: "80",
-          https_port: "443",
-          server_protocol: protocol,
-          rtmp_port: "80",
-          timezone: "Asia/Dhaka"
+          url: host, port: "80", https_port: "443", server_protocol: protocol, rtmp_port: "80", timezone: "Asia/Dhaka"
         }
       }, { headers: corsHeaders });
     }
 
-    // ২. লাইভ ক্যাটাগরি ও স্ট্রিম
     if (action === 'get_live_categories') return NextResponse.json(CATEGORY_CACHE, { headers: corsHeaders });
     if (action === 'get_live_streams') return NextResponse.json(STREAM_CACHE, { headers: corsHeaders });
-
-    // 🚀 ৪. VOD/Series প্যানিক ফিক্স: প্লেয়ার মুভি/সিরিজ খুঁজলে এরর না দিয়ে খালি ডাটা ([]) ধরিয়ে দেওয়া হবে!
-    if (action === 'get_vod_categories' || action === 'get_series_categories' || action === 'get_vod_streams' || action === 'get_series') {
-      return NextResponse.json([], { headers: corsHeaders });
-    }
+    if (action === 'get_vod_categories' || action === 'get_series_categories' || action === 'get_vod_streams' || action === 'get_series') return NextResponse.json([], { headers: corsHeaders });
 
     return NextResponse.json({ message: "Action not supported" }, { status: 400, headers: corsHeaders });
-
   } catch (error) {
-    console.error("Xtream API Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500, headers: corsHeaders });
   }
 }
