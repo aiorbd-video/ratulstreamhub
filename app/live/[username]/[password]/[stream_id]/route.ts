@@ -74,9 +74,11 @@ export async function GET(
       }
     }
 
-    // 🚀 THE MAGIC: 302 রিডাইরেক্ট বাদ দিয়ে Mini-M3U8 জেনারেট করা হচ্ছে
-    // এর ফলে Televizo/Smarters কুকি এবং হেডারগুলো ঠিকমতো সার্ভারে পাঠাতে বাধ্য হবে!
+    // 🚀 THE FINAL MAGIC: #EXTINF যুক্ত করা হলো!
+    // Televizo এই লাইনটি না পেলে নিচের কোনো কুকি রিড করে না!
     let m3uContent = "#EXTM3U\n";
+    m3uContent += `#EXTINF:-1, Live Stream\n`; // <--- এই লাইনটিই মিসিং ছিল!
+    
     if (tempHeaders['user-agent']) m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['user-agent']}\n`;
     if (tempHeaders['cookie']) m3uContent += `#EXTVLCOPT:http-cookie=${tempHeaders['cookie']}\n`;
     if (tempHeaders['referer'] || tempHeaders['referrer']) {
