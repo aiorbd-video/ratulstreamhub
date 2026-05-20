@@ -9,10 +9,9 @@ export const dynamic = 'force-dynamic';
 let STREAM_CACHE: any[] | null = null;
 let CATEGORY_CACHE: any[] | null = null;
 let CACHE_TIME = 0;
-const CACHE_TTL = 5 * 60 * 1000; // ৫ মিনিট ক্যাশ
+const CACHE_TTL = 5 * 60 * 1000; 
 let AUTH_CACHE: Record<string, { valid: boolean; expiry: number; userId: string }> = {};
 
-// 🎯 CORS হেডার (যেকোনো প্লেয়ারের জন্য অ্যালাউড)
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -23,12 +22,33 @@ export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });
 }
 
-export async function GET(req: Request) {
+// 🎯 GET ও POST উভয়ের জন্য একটি কমন হ্যান্ডেলার
+async function handleXtreamRequest(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const username = searchParams.get('username') || ''; 
-    const password = searchParams.get('password') || ''; 
-    const action = searchParams.get('action') || '';
+    const url = new URL(req.url);
+    let username = url.searchParams.get('username') || ''; 
+    let password = url.searchParams.get('password') || ''; 
+    let action = url.searchParams.get('action') || '';
+
+    // 🚀 ১. ম্যাজিক ফিক্স: প্লেয়ার যদি POST বডিতে ডাটা লুকিয়ে পাঠায়, তবে তা বের করা হবে
+    if (req.method === 'POST') {
+      try {
+        const contentType = req.headers.get('content-type') || '';
+        if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
+          const formData = await req.formData();
+          if (formData.has('username')) username = formData.get('username') as string;
+          if (formData.has('password')) password = formData.get('password') as string;
+          if (formData.has('action')) action = formData.get('action') as string;
+        } else if (contentType.includes('application/json')) {
+          const body = await req.json();
+          if (body.username) username = body.username;
+          if (body.password) password = body.password;
+          if (body.action) action = body.action;
+        }
+      } catch (e) {
+        // বডি পার্সিং ফেইল করলে ইগনোর করবে
+      }
+    }
 
     if (!username || !password) {
       return NextResponse.json({ message: "Missing credentials" }, { status: 400, headers: corsHeaders });
@@ -38,7 +58,7 @@ export async function GET(req: Request) {
     const db = client.db("all_in_one_reborn_db");
     const now = Date.now();
 
-    // 🔐 স্মার্ট অথেনটিকেশন চেক (Bcrypt Fallback সহ)
+    // 🔐 ২. স্মার্ট অথেনটিকেশন চেক
     const cacheKey = `${username}_${password}`;
     let isUserValid = false;
 
@@ -49,11 +69,9 @@ export async function GET(req: Request) {
       let passwordMatch = false;
 
       if (user && user.password) {
-        // যদি পাসওয়ার্ড হ্যাশ করা থাকে ($2a$ বা $2b$), তাহলে bcrypt দিয়ে চেক করবে
         if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
           passwordMatch = await bcrypt.compare(password, user.password);
         } else {
-          // পুরনো ইউজারদের নরমাল পাসওয়ার্ডের জন্য
           passwordMatch = user.password === password;
         }
       }
@@ -69,11 +87,10 @@ export async function GET(req: Request) {
     }
 
     if (!isUserValid) {
-      // 🚫 প্লেয়ারকে লগইন ফেইলড মেসেজ দেওয়া হচ্ছে
       return NextResponse.json({ user_info: { auth: 0, status: "Not Authorized" } }, { headers: corsHeaders });
     }
 
-    // 🎯 মেমোরি থেকে ডাটা লোড
+    // 🎯 ৩. মেমোরি ক্যাশ আপডেট (ডাটাবেস অপটিমাইজেশন)
     if (!STREAM_CACHE || !CATEGORY_CACHE || (now - CACHE_TIME) > CACHE_TTL) {
       const [streams, mergedM3uDoc] = await Promise.all([
         db.collection("posted_streams").find({}, { projection: { title: 1, group: 1, logo: 1, stream_url: 1 } }).toArray(),
@@ -130,8 +147,20 @@ export async function GET(req: Request) {
         }
       }
 
-      // যদি ডাটাবেস একদম ফাঁকা থাকে, তবে একটি ডামি ক্যাটাগরি পাঠানো হবে যাতে "Playlist not found" না আসে
-      if (categoriesMap.size === 0) categoriesMap.add("No Channels Available");
+      // ⚠️ যদি আপনার সার্ভারে কোনো চ্যানেল না থাকে, তবে একটি ডামি চ্যানেল দেওয়া হবে। নইলে প্লেয়ার ক্র্যাশ করবে!
+      if (processedStreams.length === 0) {
+        categoriesMap.add("Welcome");
+        processedStreams.push({
+          num: 1,
+          name: "No Channels Available",
+          stream_id: "dummy_stream",
+          stream_icon: "",
+          category_id: Buffer.from("Welcome").toString('base64').substring(0, 8),
+          container_extension: "m3u8",
+          custom_sid: "",
+          tv_archive: 0
+        });
+      }
 
       const processedCategories = Array.from(categoriesMap).map((catName) => ({
         category_id: Buffer.from(catName).toString('base64').substring(0, 8),
@@ -147,7 +176,7 @@ export async function GET(req: Request) {
     const host = req.headers.get('host') || 'localhost';
     const protocol = req.headers.get('x-forwarded-proto') || 'https';
 
-    // ১. লগইন রিকোয়েস্ট
+    // ১. লগইন হ্যান্ডেলার
     if (!action) {
       return NextResponse.json({
         user_info: {
@@ -171,14 +200,13 @@ export async function GET(req: Request) {
       }, { headers: corsHeaders });
     }
 
-    // ২. ক্যাটাগরি রিকোয়েস্ট
-    if (action === 'get_live_categories') {
-      return NextResponse.json(CATEGORY_CACHE, { headers: corsHeaders });
-    }
+    // ২. লাইভ ক্যাটাগরি ও স্ট্রিম
+    if (action === 'get_live_categories') return NextResponse.json(CATEGORY_CACHE, { headers: corsHeaders });
+    if (action === 'get_live_streams') return NextResponse.json(STREAM_CACHE, { headers: corsHeaders });
 
-    // ৩. স্ট্রিম রিকোয়েস্ট
-    if (action === 'get_live_streams') {
-      return NextResponse.json(STREAM_CACHE, { headers: corsHeaders });
+    // 🚀 ৪. VOD/Series প্যানিক ফিক্স: প্লেয়ার মুভি/সিরিজ খুঁজলে এরর না দিয়ে খালি ডাটা ([]) ধরিয়ে দেওয়া হবে!
+    if (action === 'get_vod_categories' || action === 'get_series_categories' || action === 'get_vod_streams' || action === 'get_series') {
+      return NextResponse.json([], { headers: corsHeaders });
     }
 
     return NextResponse.json({ message: "Action not supported" }, { status: 400, headers: corsHeaders });
@@ -189,7 +217,5 @@ export async function GET(req: Request) {
   }
 }
 
-// 🎯 কিছু কড়া আইপিটিভি প্লেয়ার POST রিকোয়েস্ট পাঠায়, তার জন্য এই ফলব্যাক
-export async function POST(req: Request) {
-  return GET(req);
-              }
+export async function GET(req: Request) { return handleXtreamRequest(req); }
+export async function POST(req: Request) { return handleXtreamRequest(req); }
