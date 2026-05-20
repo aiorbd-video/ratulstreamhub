@@ -21,8 +21,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🚫 ব্রাউজার হ্যাকার ব্লক: পিসি বা মোবাইলের ব্রাউজার থেকে লিংক চুরি সম্পূর্ণ বন্ধ!
-    // কিন্তু Televizo (যার User-Agent অনেক সময় ফাঁকা বা okhttp থাকে) তাকে অ্যালাউ করা হবে।
+    // 🚫 ব্রাউজার হ্যাকার ব্লক (সিকিউরিটি অক্ষুণ্ন রাখা হলো)
     const isBrowser = userAgent.includes('mozilla') && 
                       (userAgent.includes('chrome') || userAgent.includes('safari') || userAgent.includes('firefox') || userAgent.includes('edge')) && 
                       !userAgent.includes('tv') && 
@@ -30,7 +29,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
                       !userAgent.includes('iptv');
 
     if (isBrowser) {
-      return new Response("🚫 Access Denied! This premium playlist is strictly locked. Please use an IPTV application like Televizo.", { 
+      return new Response("🚫 Access Denied! Please open this M3U playlist inside Televizo app.", { 
         status: 403, 
         headers: { "Content-Type": "text/plain", ...securityHeaders } 
       });
@@ -40,9 +39,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const db = client.db("all_in_one_reborn_db");
 
     let userId;
-    try { 
-      userId = new ObjectId(params.id); 
-    } catch (e) {
+    try { userId = new ObjectId(params.id); } catch (e) {
       return new Response("#EXTM3U\n#EXTINF:-1, ❌ Invalid User ID\nhttp://error.local", { status: 400, headers: securityHeaders });
     }
 
@@ -76,7 +73,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       rawM3uText += `${mergedM3uDoc.content}\n`;
     }
 
-    // 🚀 Televizo অপটিমাইজড পার্সার (Native VLCOPT Builder)
+    // 🚀 Televizo native parser engine
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
     const lines = rawM3uText.split(/\r?\n/);
     
@@ -113,37 +110,51 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       else if (line.startsWith('http')) {
         let fullUrl = line.replace(/[\r\n\s]+/g, "").trim();
 
+        // 🎯 যদি ইনপুট লিংকে আগে থেকেই Pipe (|) ফরমেটে হেডার থাকে, ওটাকেও খুলে আলাদা করা হচ্ছে
         if (fullUrl.includes('|')) {
           const parts = fullUrl.split('|');
-          fullUrl = parts[0];
-          const headerPairs = parts[1].split('&');
-          for (const pair of headerPairs) {
-            const [key, val] = pair.split('=');
-            if (key && val) tempHeaders[key.trim()] = val.trim();
+          fullUrl = parts[0].trim();
+          if (parts[1]) {
+            const headerPairs = parts[1].split('&');
+            for (const pair of headerPairs) {
+              const equalIndex = pair.indexOf('=');
+              if (equalIndex > 0) {
+                const key = pair.substring(0, equalIndex).trim();
+                const val = pair.substring(equalIndex + 1).trim();
+                if (key.toLowerCase() === 'cookie') tempHeaders['Cookie'] = val;
+                else if (key.toLowerCase() === 'user-agent') tempHeaders['User-Agent'] = val;
+                else if (key.toLowerCase() === 'referer' || key.toLowerCase() === 'referrer') tempHeaders['Referer'] = val;
+                else if (key.toLowerCase() === 'origin') tempHeaders['Origin'] = val;
+              }
+            }
           }
         }
 
+        // #EXTINF রাইট করা হচ্ছে
         if (currentExtInf) {
           m3uContent += `${currentExtInf}\n`;
           currentExtInf = ""; 
         }
 
-        // 🎯 Televizo এর পছন্দের স্টাইল
+        // 🎯 Televizo-র জন্য ১টি লিংকের বিপরীতে আলাদা আলাদা লাইনে EXTVLCOPT রাইট করা হচ্ছে
         if (tempHeaders['User-Agent']) {
           m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['User-Agent']}\n`;
         }
         if (tempHeaders['Referer']) {
           m3uContent += `#EXTVLCOPT:http-referrer=${tempHeaders['Referer']}\n`;
         }
-        
-        let extraPipes = "";
-        for (const [key, val] of Object.entries(tempHeaders)) {
-          if (key !== 'User-Agent' && key !== 'Referer') {
-            extraPipes += `${extraPipes ? '&' : '|'}${key}=${val}`;
-          }
+        if (tempHeaders['Cookie']) {
+          // ⚠️ Toffee-র মাল্টিপল '=' যুক্ত কুকি এখানে একদম র (Raw) অবস্থায় নিখুঁতভাবে বসবে
+          m3uContent += `#EXTVLCOPT:http-cookie=${tempHeaders['Cookie']}\n`;
         }
-
-        m3uContent += `${fullUrl}${extraPipes}\n`;
+        if (tempHeaders['Origin']) {
+          m3uContent += `#EXTVLCOPT:http-origin=${tempHeaders['Origin']}\n`;
+        }
+        
+        // 🚀 ফাইনাল ম্যাজিক: লিংকটি থাকবে একদম ফ্রেশ ও অরিজিনাল (কোনো পাইপ সাইন ছাড়া)
+        m3uContent += `${fullUrl}\n`;
+        
+        // হেডার বাকেট রিসেট
         tempHeaders = {}; 
       } 
       else if (!line.startsWith('#EXTVLCOPT') && !line.startsWith('#EXTHTTP')) {
@@ -161,7 +172,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       status: 200,
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
-        "Content-Disposition": `inline; filename="Televizo_Reborn_${user.phone || 'VIP'}.m3u"`,
+        "Content-Disposition": `inline; filename="All_In_One_Televizo_${user.phone || 'VIP'}.m3u"`,
         ...securityHeaders
       }
     });
