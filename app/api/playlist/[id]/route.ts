@@ -4,15 +4,13 @@ import { ObjectId } from 'mongodb';
 
 export const dynamic = 'force-dynamic';
 
-// 🛡️ কড়া CORS ও ক্যাশ পলিসি (Enterprise M3U Standard)
 const securityHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "*",
-  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  "Cache-Control": "no-store, no-cache, must-revalidate",
   "Pragma": "no-cache",
-  "Expires": "0",
-  "X-Content-Type-Options": "nosniff"
+  "Expires": "0"
 };
 
 export async function OPTIONS() {
@@ -23,8 +21,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const userAgent = req.headers.get('user-agent')?.toLowerCase() || '';
 
-    // 🚫 ১. অ্যান্টি-স্ক্র্যাপিং লজিক (Browser Blacklist)
-    // পিসি বা মোবাইলের নরমাল ব্রাউজার থেকে লিংক চুরি বন্ধ, কিন্তু প্লেয়ারগুলো এক্সেস পাবে
+    // 🚫 ব্রাউজার হ্যাকার ব্লক (সিকিউরিটি অক্ষুণ্ন রাখা হলো)
     const isBrowser = userAgent.includes('mozilla') && 
                       (userAgent.includes('chrome') || userAgent.includes('safari') || userAgent.includes('firefox') || userAgent.includes('edge')) && 
                       !userAgent.includes('tv') && 
@@ -32,38 +29,33 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
                       !userAgent.includes('iptv');
 
     if (isBrowser) {
-      return new Response("🚫 Access Denied! Premium IPTV Playlist. Browser access is strictly prohibited.", { 
+      return new Response("🚫 Access Denied! Please open this M3U playlist inside Televizo app.", { 
         status: 403, 
         headers: { "Content-Type": "text/plain", ...securityHeaders } 
       });
     }
 
-    // 🗄️ ২. ডাটাবেস কানেকশন ও মেমোরি অপটিমাইজেশন
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
     let userId;
-    try { 
-      userId = new ObjectId(params.id); 
-    } catch (e) {
+    try { userId = new ObjectId(params.id); } catch (e) {
       return new Response("#EXTM3U\n#EXTINF:-1, ❌ Invalid User ID\nhttp://error.local", { status: 400, headers: securityHeaders });
     }
 
-    // Projection ব্যবহার করে শুধু দরকারি ফিল্ড আনা হচ্ছে (ডাটাবেস স্পিড বুস্ট হবে)
     const user = await db.collection("web_users").findOne(
       { _id: userId }, 
       { projection: { isPremium: 1, premiumExpiry: 1, phone: 1 } }
     );
 
-    // 🎯 ৩. প্রিমিয়াম ইউজার এবং এক্সপায়ার ডেট চেক ভ্যালিডেশন
+    // 🎯 ডাটাবেস থেকে ইউজারের মেয়াদ যাচাই (মেয়াদ শেষ হলে প্লেলিস্ট অফ হয়ে যাবে)
     if (!user || !user.isPremium || (user.premiumExpiry && new Date(user.premiumExpiry) < new Date())) {
-      return new Response("#EXTM3U\n#EXTINF:-1, 🚫 Subscription Expired or Invalid!\nhttp://expired.local", {
+      return new Response("#EXTM3U\n#EXTINF:-1, 🚫 Subscription Expired!\nhttp://expired.local", {
         status: 403,
         headers: { "Content-Type": "application/vnd.apple.mpegurl", ...securityHeaders }
       });
     }
 
-    // 🎯 ৪. প্যারালাল ডাটা ফেচিং (Streams & Merged Text)
     const [streams, mergedM3uDoc] = await Promise.all([
       db.collection("posted_streams").find({}, { projection: { title: 1, group: 1, logo: 1, stream_url: 1 } }).toArray(),
       db.collection("system_settings").findOne({ key: "merged_premium_m3u" }, { projection: { content: 1 } })
@@ -71,7 +63,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     let rawM3uText = "";
 
-    // posted_streams ডাটা প্রসেসিং
     for (const stream of streams) {
       if (!stream.stream_url) continue;
       let rawTitle = (stream.title || "").replace(/tvg-[a-zA-Z0-9\-]+="[^"]*"/g, "").replace(/(https?:\/\/[^\s]+)/g, "").replace(/^[,-\s]+/, "").trim() || "Live TV";
@@ -79,13 +70,20 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       rawM3uText += `${stream.stream_url.trim()}\n`;
     }
 
-    // মার্জড ফাইল বা টেক্সট ডাটা প্রসেসিং
     if (mergedM3uDoc && mergedM3uDoc.content) {
       rawM3uText += `${mergedM3uDoc.content}\n`;
     }
 
-    // 🚀 ৫. Televizo Native Parser Engine (The Ultimate Converter)
+    // 🚀 Televizo native parser engine
     let m3uContent = "#EXTM3U x-tvg-url=\"\"\n";
+
+    // 🎯 ম্যাজিক: প্লেলিস্টের সবার উপরে ইউজারের মেয়াদ দেখানোর জন্য একটি ডামি চ্যানেল
+    const expText = user.premiumExpiry 
+      ? new Date(user.premiumExpiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) 
+      : "Unlimited (Lifetime)";
+    m3uContent += `#EXTINF:-1 tvg-logo="https://cdn-icons-png.flaticon.com/512/2740/2740600.png" group-title="⭐ Account Info", 👤 VIP Status | Expiry: ${expText}\n`;
+    m3uContent += `http://local.info/account\n`;
+
     const lines = rawM3uText.split(/\r?\n/);
     
     let tempHeaders: Record<string, string> = {};
@@ -121,7 +119,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       else if (line.startsWith('http')) {
         let fullUrl = line.replace(/[\r\n\s]+/g, "").trim();
 
-        // যদি কোনো লিংকের শেষে আগে থেকে পাইপ থাকে, ওটা ভেঙে হেডার বের করা হচ্ছে
+        // 🎯 যদি ইনপুট লিংকে আগে থেকেই Pipe (|) ফরমেটে হেডার থাকে, ওটাকেও খুলে আলাদা করা হচ্ছে
         if (fullUrl.includes('|')) {
           const parts = fullUrl.split('|');
           fullUrl = parts[0].trim();
@@ -130,12 +128,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             for (const pair of headerPairs) {
               const equalIndex = pair.indexOf('=');
               if (equalIndex > 0) {
-                const key = pair.substring(0, equalIndex).trim().toLowerCase();
+                const key = pair.substring(0, equalIndex).trim();
                 const val = pair.substring(equalIndex + 1).trim();
-                if (key === 'cookie') tempHeaders['Cookie'] = val;
-                else if (key === 'user-agent') tempHeaders['User-Agent'] = val;
-                else if (key === 'referer' || key === 'referrer') tempHeaders['Referer'] = val;
-                else if (key === 'origin') tempHeaders['Origin'] = val;
+                if (key.toLowerCase() === 'cookie') tempHeaders['Cookie'] = val;
+                else if (key.toLowerCase() === 'user-agent') tempHeaders['User-Agent'] = val;
+                else if (key.toLowerCase() === 'referer' || key.toLowerCase() === 'referrer') tempHeaders['Referer'] = val;
+                else if (key.toLowerCase() === 'origin') tempHeaders['Origin'] = val;
               }
             }
           }
@@ -147,7 +145,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           currentExtInf = ""; 
         }
 
-        // 🎯 Televizo নেটিভ ফরম্যাট জেনারেশন (লিংকের ঠিক ওপরে ট্যাগগুলো বসবে)
+        // 🎯 Televizo-র জন্য ১টি লিংকের বিপরীতে আলাদা আলাদা লাইনে EXTVLCOPT রাইট করা হচ্ছে
         if (tempHeaders['User-Agent']) {
           m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['User-Agent']}\n`;
         }
@@ -155,14 +153,17 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           m3uContent += `#EXTVLCOPT:http-referrer=${tempHeaders['Referer']}\n`;
         }
         if (tempHeaders['Cookie']) {
+          // ⚠️ Toffee-র মাল্টিপল '=' যুক্ত কুকি এখানে একদম র (Raw) অবস্থায় নিখুঁতভাবে বসবে
           m3uContent += `#EXTVLCOPT:http-cookie=${tempHeaders['Cookie']}\n`;
         }
         if (tempHeaders['Origin']) {
           m3uContent += `#EXTVLCOPT:http-origin=${tempHeaders['Origin']}\n`;
         }
         
-        // 🚀 ফাইনাল ম্যাজিক: মূল লিংকটি থাকবে একদম ফ্রেশ ও ক্লিন (পাইপ সাইন ছাড়া) যাতে প্লেয়ার ক্র্যাশ না করে
+        // 🚀 ফাইনাল ম্যাজিক: লিংকটি থাকবে একদম ফ্রেশ ও অরিজিনাল (কোনো পাইপ সাইন ছাড়া)
         m3uContent += `${fullUrl}\n`;
+        
+        // হেডার বাকেট রিসেট
         tempHeaders = {}; 
       } 
       else if (!line.startsWith('#EXTVLCOPT') && !line.startsWith('#EXTHTTP')) {
@@ -176,7 +177,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     if (currentExtInf) m3uContent += `${currentExtInf}\n`;
 
-    // 🎯 ৬. রেসপন্স ডেলিভারি (M3U হেডার ফাইলসহ)
     return new Response(m3uContent, {
       status: 200,
       headers: {
@@ -187,7 +187,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     });
 
   } catch (error) {
-    console.error("Playlist Rollback Error:", error);
     return new Response("#EXTM3U\n#EXTINF:-1, ❌ Server Error\nhttp://error.local", { status: 500, headers: securityHeaders });
   }
 }
