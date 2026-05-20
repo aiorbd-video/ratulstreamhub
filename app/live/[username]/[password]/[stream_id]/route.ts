@@ -4,7 +4,6 @@ import clientPromise from '@/lib/mongodb';
 
 export const dynamic = 'force-dynamic';
 
-// 🚀 মেইন ইঞ্জিনের মতো একই নিউমেরিক হ্যাশ ফাংশন
 function getNumericId(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -21,9 +20,7 @@ export async function GET(
   try {
     const { username, password, streamId } = params;
     
-    // Televizo থেকে আসা স্ট্রিম আইডি (যেমন: 748392.m3u8) থেকে শুধু সংখ্যা বের করা
     const targetId = parseInt(streamId.split('.')[0]);
-
     if (isNaN(targetId)) return new Response("Invalid Stream ID", { status: 400 });
 
     const client = await clientPromise;
@@ -36,7 +33,6 @@ export async function GET(
 
     let targetStreamUrl = "";
 
-    // 🎯 ১. Posted Streams-এর ভেতর নিউমেরিক আইডি খোঁজ করা
     const streams = await db.collection("posted_streams").find({}, { projection: { stream_url: 1 } }).toArray();
     for (const stream of streams) {
       if (getNumericId(stream._id.toString()) === targetId) {
@@ -45,7 +41,6 @@ export async function GET(
       }
     }
 
-    // 🎯 ২. যদি না পাওয়া যায়, তবে Merged M3U-এর ভেতর খোঁজ করা
     if (!targetStreamUrl) {
       const mergedM3uDoc = await db.collection("system_settings").findOne({ key: "merged_premium_m3u" }, { projection: { content: 1 } });
       if (mergedM3uDoc && mergedM3uDoc.content) {
@@ -79,16 +74,25 @@ export async function GET(
       }
     }
 
-    const redirectHeaders = new Headers();
-    redirectHeaders.set("Location", finalCleanUrl);
-    redirectHeaders.set("Access-Control-Allow-Origin", "*");
+    // 🚀 THE MAGIC: 302 রিডাইরেক্ট বাদ দিয়ে Mini-M3U8 জেনারেট করা হচ্ছে
+    // এর ফলে Televizo/Smarters কুকি এবং হেডারগুলো ঠিকমতো সার্ভারে পাঠাতে বাধ্য হবে!
+    let m3uContent = "#EXTM3U\n";
+    if (tempHeaders['user-agent']) m3uContent += `#EXTVLCOPT:http-user-agent=${tempHeaders['user-agent']}\n`;
+    if (tempHeaders['cookie']) m3uContent += `#EXTVLCOPT:http-cookie=${tempHeaders['cookie']}\n`;
+    if (tempHeaders['referer'] || tempHeaders['referrer']) {
+      m3uContent += `#EXTVLCOPT:http-referrer=${tempHeaders['referer'] || tempHeaders['referrer']}\n`;
+    }
+    if (tempHeaders['origin']) m3uContent += `#EXTVLCOPT:http-origin=${tempHeaders['origin']}\n`;
+    
+    m3uContent += `${finalCleanUrl}\n`;
 
-    if (tempHeaders['user-agent']) redirectHeaders.set("X-Forwarded-User-Agent", tempHeaders['user-agent']);
-    if (tempHeaders['cookie']) redirectHeaders.set("Set-Cookie", tempHeaders['cookie']);
-
-    return new Response(null, {
-      status: 302,
-      headers: redirectHeaders
+    return new Response(m3uContent, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.apple.mpegurl",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache"
+      }
     });
 
   } catch (error) {
