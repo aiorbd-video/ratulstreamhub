@@ -1,5 +1,3 @@
-// app/api/playlist/[id]/route.ts
-
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
@@ -21,555 +19,436 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
 
-  try {
+try {
 
-    const userAgent =
-      req.headers
-      .get("user-agent")
-      ?.toLowerCase() || "";
+const client = await clientPromise;
 
-    // 🚫 Browser block
-    const isBrowser =
+const db =
+client.db(
+"all_in_one_reborn_db"
+);
 
-      userAgent.includes('mozilla') &&
+let userId;
 
-      (
-        userAgent.includes('chrome') ||
-        userAgent.includes('safari') ||
-        userAgent.includes('firefox') ||
-        userAgent.includes('edge')
-      ) &&
+try{
 
-      !userAgent.includes('tv') &&
-      !userAgent.includes('smarters') &&
-      !userAgent.includes('iptv');
+userId =
+new ObjectId(
+params.id
+);
 
-    if (isBrowser) {
+}catch{
 
-      return new Response(
-        "🚫 Access Denied! Open inside IPTV Player only.",
-        {
-          status:403,
-          headers:{
-            "Content-Type":"text/plain",
-            "Access-Control-Allow-Origin":"*"
-          }
-        }
-      );
-
-    }
-
-    const client =
-      await clientPromise;
-
-    const db =
-      client.db(
-        "all_in_one_reborn_db"
-      );
-
-    let userId;
-
-    try {
-
-      userId =
-      new ObjectId(
-        params.id
-      );
-
-    } catch {
-
-      return new Response(
+return new Response(
 `#EXTM3U
-#EXTINF:-1,❌ Invalid User
+#EXTINF:-1,Invalid User
 http://error.local`,
-{
-status:400
+{status:400}
+);
+
 }
-      );
-
-    }
 
 
-    const user =
-    await db
-    .collection(
-      "web_users"
-    )
-    .findOne({
-      _id:userId
-    });
+const user =
+await db
+.collection(
+"web_users"
+)
+.findOne({
+_id:userId
+});
 
 
-    if(
+if(
+!user ||
+!user.isPremium ||
+(
+user.premiumExpiry &&
+new Date(
+user.premiumExpiry
+)<new Date()
+)
+){
 
-      !user ||
-
-      !user.isPremium ||
-
-      (
-        user.premiumExpiry &&
-
-        new Date(
-          user.premiumExpiry
-        ) <
-        new Date()
-      )
-
-    ){
-
-      return new Response(
+return new Response(
 `#EXTM3U
-#EXTINF:-1,🚫 Subscription Expired
+#EXTINF:-1,Subscription Expired
 http://expired.local`,
 {
 headers:{
 "Content-Type":
-"application/vnd.apple.mpegurl",
-"Access-Control-Allow-Origin":"*"
+"application/vnd.apple.mpegurl"
 }
 }
-      );
+);
 
-    }
-
-    let m3uContent =
-    `#EXTM3U x-tvg-url=""\n`;
+}
 
 
-
-    // ========= DATABASE STREAMS =========
-
-    const streams =
-    await db
-    .collection(
-      "posted_streams"
-    )
-    .find({})
-    .toArray();
+let m3uContent=
+`#EXTM3U\n`;
 
 
-    streams.forEach(stream=>{
-
-      let rawTitle =
-
-      (
-        stream.title || ""
-      )
-
-      .replace(
-      /tvg-[a-zA-Z0-9\-]+="[^"]*"/g,
-      ""
-      )
-
-      .replace(
-      /(https?:\/\/[^\s]+)/g,
-      ""
-      )
-
-      .replace(
-      /^[,-\s]+/,
-      ""
-      )
-
-      .trim()
-
-      || "Live TV";
-
-
-      if(
-        stream.stream_url
-      ){
-
-        m3uContent +=
-
-`#EXTINF:-1 tvg-logo="${stream.logo || ''}" group-title="${stream.group || 'Live TV'}",${rawTitle}
-${stream.stream_url.replace(/[\r\n\s]+/g,'').trim()}
+// TEST stream
+m3uContent +=
+`#EXTINF:-1 group-title="TEST",TEST CHANNEL
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
 `;
 
-      }
 
-    });
 
+const streams=
+await db
+.collection(
+"posted_streams"
+)
+.find({})
+.toArray();
 
 
-    // ========= PREMIUM M3U =========
+streams.forEach(stream=>{
 
-    const mergedM3uDoc =
-    await db
-    .collection(
-      "system_settings"
-    )
-    .findOne({
-      key:
-      "merged_premium_m3u"
-    });
+if(
+stream.stream_url
+){
 
+let title=
 
-    if(
-      mergedM3uDoc?.content
-    ){
+(stream.title||"Live TV")
 
-      const lines=
+.replace(
+/tvg-[^"]+="[^"]*"/g,
+""
+)
 
-      mergedM3uDoc
-      .content
-      .split(/\r?\n/);
+.trim();
 
 
-      let tempHeaders:
-      Record<string,string>
-      ={};
+m3uContent +=
 
+`#EXTINF:-1 tvg-logo="${stream.logo||''}" group-title="${stream.group||'Live'}",${title}
+${stream.stream_url.trim()}
+`;
 
-      for(
-        let i=0;
-        i<lines.length;
-        i++
-      ){
+}
 
-        let line=
-        lines[i]
-        .trim();
+});
 
 
-        if(
-          !line
-        ) continue;
 
+const mergedM3uDoc=
 
+await db
+.collection(
+"system_settings"
+)
+.findOne({
 
-        // EXTINF
-        if(
-          line.startsWith(
-            "#EXTINF"
-          )
-        ){
+key:
+"merged_premium_m3u"
 
-          m3uContent +=
-          line+"\n";
+});
 
-        }
 
+if(
+mergedM3uDoc?.content
+){
 
+const lines=
 
-        // User-Agent
-        else if(
+mergedM3uDoc
+.content
+.split(/\r?\n/);
 
-          line.startsWith(
-'#EXTVLCOPT:http-user-agent='
-          )
 
-        ){
+let tempHeaders:
+Record<
+string,
+string
+>={};
 
-          tempHeaders[
-            "User-Agent"
-          ]=
 
-          line.substring(
-'#EXTVLCOPT:http-user-agent='.length
-          )
-          .trim();
+for(
+let i=0;
+i<lines.length;
+i++
+){
 
-        }
+let line=
+lines[i]
+.trim();
 
+if(
+!line
+)
+continue;
 
 
-        // Referer + Referrer support
-        else if(
 
-          line.startsWith(
-'#EXTVLCOPT:http-referer='
-          )
+if(
+line.startsWith(
+"#EXTINF"
+)
+){
 
-          ||
+m3uContent +=
+line+"\n";
 
-          line.startsWith(
-'#EXTVLCOPT:http-referrer='
-          )
+}
 
-        ){
 
-          tempHeaders[
-            "Referer"
-          ]=
 
-          line
-          .split("=")
-          .slice(1)
-          .join("=")
-          .trim();
+else if(
 
-        }
+line.startsWith(
+"#EXTVLCOPT:http-user-agent="
+)
 
+){
 
+tempHeaders[
+"User-Agent"
+]=
 
-        // JSON HEADER
-        else if(
+line.substring(
+33
+).trim();
 
-          line.startsWith(
-            "#EXTHTTP:"
-          )
+}
 
-        ){
 
-          try{
 
-            const jsonStr=
+else if(
 
-            line.substring(
-              9
-            );
+line.startsWith(
+"#EXTVLCOPT:http-referer="
+)
 
+||
 
-            const parsed=
-            JSON.parse(
-              jsonStr
-            );
+line.startsWith(
+"#EXTVLCOPT:http-referrer="
+)
 
+){
 
-            Object.entries(
-              parsed
-            )
+tempHeaders[
+"Referer"
+]=
 
-            .forEach(
-            ([k,v])=>{
+line
+.split("=")
+.slice(1)
+.join("=")
+.trim();
 
-              const key=
+}
 
-              k
-              .toLowerCase();
 
 
-              if(
+else if(
 
-                key==="cookie"
+line.startsWith(
+"#EXTHTTP:"
+)
 
-              ){
+){
 
-                tempHeaders[
-                  "Cookie"
-                ]=
+try{
 
-                String(v);
+const parsed=
 
-              }
+JSON.parse(
+line.substring(
+9
+)
+);
 
 
-              else if(
 
-                key==="referer" ||
+if(
+parsed.cookie ||
+parsed.Cookie
+){
 
-                key==="referrer"
+tempHeaders[
+"Cookie"
+]=
 
-              ){
+parsed.cookie||
+parsed.Cookie;
 
-                tempHeaders[
-                  "Referer"
-                ]=
+}
 
-                String(v);
 
-              }
+if(
+parsed.origin ||
+parsed.Origin
+){
 
+tempHeaders[
+"Origin"
+]=
 
-              else if(
+parsed.origin||
+parsed.Origin;
 
-                key==="origin"
+}
 
-              ){
 
-                tempHeaders[
-                  "Origin"
-                ]=
 
-                String(v);
+if(
 
-              }
+parsed.referer ||
 
+parsed.referrer ||
 
-              else if(
+parsed.Referer
 
-                key==="user-agent" ||
+){
 
-                key==="useragent"
+tempHeaders[
+"Referer"
+]=
 
-              ){
+parsed.referer||
 
-                tempHeaders[
-                  "User-Agent"
-                ]=
+parsed.referrer||
 
-                String(v);
+parsed.Referer;
 
-              }
+}
 
-            });
 
-          }
 
-          catch(e){
+}catch(e){}
 
-            console.log(
-              "JSON parse error:",
-              e
-            );
+}
 
-          }
 
-        }
 
+else if(
 
+line.startsWith(
+"http"
+)
 
-        // URL
-        else if(
+){
 
-          line.startsWith(
-            "http://"
-          )
+let fullUrl=
+line.trim();
 
-          ||
 
-          line.startsWith(
-            "https://"
-          )
+// important
+if(
 
-        ){
+!tempHeaders[
+"User-Agent"
+]
 
-          let fullUrl=
+){
 
-          line
-          .replace(
-            /[\r\n\s]+/g,
-            ""
-          )
-          .trim();
+tempHeaders[
+"User-Agent"
+]=
+"Mozilla/5.0";
 
+}
 
 
-          // pipe attach
-          if(
 
-            !fullUrl.includes(
-              "|"
-            )
+if(
 
-            &&
+Object.keys(
+tempHeaders
+)
+.length>0
 
-            Object.keys(
-              tempHeaders
-            ).length>0
+&&
 
-          ){
+!fullUrl.includes(
+"|"
+)
 
-            let pipeStr="";
+){
 
+let headerStr=
 
-            for(
+Object.entries(
+tempHeaders
+)
 
-              const[
-                key,
-                val
-              ]
+.map(
+([k,v])=>
 
-              of
+`${k}=${v}`
 
-              Object.entries(
-                tempHeaders
-              )
+)
 
-            ){
+.join("&");
 
-              pipeStr +=
 
-`${pipeStr ? '&':'|'}${key}=${encodeURIComponent(String(val))}`;
+fullUrl +=
 
-            }
+"|"+headerStr;
 
+}
 
-            fullUrl +=
-            pipeStr;
 
-          }
 
+m3uContent +=
+fullUrl+"\n";
 
 
-          m3uContent +=
-          fullUrl+"\n";
+tempHeaders={};
 
+}
 
-          // reset
-          tempHeaders={};
+}
 
-        }
+}
 
 
 
-        // অন্য tags রেখে দাও
-        else{
+return new Response(
 
-          if(
+m3uContent,
 
-            !line.startsWith(
-              "#EXTVLCOPT"
-            )
+{
 
-            &&
+status:200,
 
-            !line.startsWith(
-              "#EXTHTTP"
-            )
+headers:{
 
-          ){
-
-            m3uContent +=
-            line+"\n";
-
-          }
-
-        }
-
-      }
-
-    }
-
-
-
-    return new Response(
-      m3uContent,
-      {
-
-        status:200,
-
-        headers:{
-
-"Content-Type":"application/vnd.apple.mpegurl",
+"Content-Type":
+"application/vnd.apple.mpegurl",
 
 "Content-Disposition":
-`inline; filename="Reborn_Playlist_${user.phone}.m3u"`,
+`inline; filename="playlist_${user.phone}.m3u"`,
 
 "Access-Control-Allow-Origin":"*"
 
-        }
+}
 
-      }
-    );
+}
 
+);
 
-  }
+}
 
-  catch(error){
+catch(e){
 
-console.log(error);
+console.log(e);
 
 return new Response(
 `#EXTM3U
-#EXTINF:-1,❌ Server Error
+#EXTINF:-1,Server Error
 http://error.local`,
 {
 status:500
 }
 );
 
-  }
+}
 
 }
