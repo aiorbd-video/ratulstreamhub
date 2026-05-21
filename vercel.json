@@ -14,12 +14,19 @@
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Cache-Control", "value": "s-maxage=1, stale-while-revalidate=59" }
       ]
+    },
+    {
+      "source": "/player_api.php",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" }
+      ]
     }
   ],
   "crons": [
     {
       "path": "/api/cron/sync",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/10 * * * *"
     }
   ]
 }
