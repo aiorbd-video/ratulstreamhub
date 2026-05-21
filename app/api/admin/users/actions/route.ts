@@ -1,91 +1,128 @@
-// ফাইল পাথ: app/api/admin/users/action/route.ts
+// ফাইল পাথ: app/api/admin/user/action/route.ts
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import bcrypt from 'bcryptjs'; // 🎯 পাসওয়ার্ড হ্যাশ করার জন্য bcrypt ইমপোর্ট করা হলো
+import bcrypt from 'bcryptjs';
 
+export const dynamic = 'force-dynamic';
+
+// 🎯 ১. সব ইউজারের লিস্ট দেখার জন্য (GET Request)
+export async function GET() {
+  try {
+    const client = await clientPromise;
+    const db = client.db("all_in_one_reborn_db");
+    
+    const users = await db.collection("web_users")
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    return NextResponse.json({ success: true, users });
+  } catch (error) {
+    return NextResponse.json({ success: false, message: "সার্ভার এরর!" }, { status: 500 });
+  }
+}
+
+// 🎯 ২. নতুন ইউজার তৈরি করার জন্য (POST Request)
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { action, userId } = body;
+    const { phone, password, isPremium, premiumExpiry } = await req.json();
 
-    if (!userId) {
-      return NextResponse.json({ success: false, message: "ইউজার আইডি পাওয়া যায়নি!" }, { status: 400 });
-    }
-
-    // 🎯 নিরাপত্তা ফিক্স: আইডিটি বৈধ ObjectId কি না তা ভেরিফাই করা
-    let objId;
-    try {
-      objId = new ObjectId(userId);
-    } catch (e) {
-      return NextResponse.json({ success: false, message: "অবৈধ ইউজার আইডি ফরম্যাট!" }, { status: 400 });
+    if (!phone || !password) {
+      return NextResponse.json({ success: false, message: "ফোন এবং পাসওয়ার্ড বাধ্যতামূলক!" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
 
-    // 🗑️ ১. ইউজার ডিলিট করার অ্যাকশন
-    if (action === 'delete') {
-      const result = await db.collection("web_users").deleteOne({ _id: objId });
-      if (result.deletedCount === 0) {
-        return NextResponse.json({ success: false, message: "এই ইউজার ডাটাবেসে নেই!" }, { status: 404 });
-      }
-      return NextResponse.json({ success: true, message: "ইউজারকে সফলভাবে ডিলিট করা হয়েছে!" });
+    const existingUser = await db.collection("web_users").findOne({ phone: phone.trim() });
+    if (existingUser) {
+      return NextResponse.json({ success: false, message: "এই ফোন নম্বরে অলরেডি অ্যাকাউন্ট আছে!" }, { status: 400 });
     }
 
-    // ✏️ ২. ইউজার সাধারণ তথ্য এবং পাসওয়ার্ড এডিট করার অ্যাকশন (নতুন যুক্ত করা হলো)
-    if (action === 'edit_user' || action === 'update') {
-      const { name, phone, password } = body;
-      const updateData: any = {};
+    // 🔐 পাসওয়ার্ড হ্যাশ করা
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password.trim(), salt);
 
-      if (name !== undefined) updateData.name = name;
-      if (phone !== undefined) updateData.phone = phone;
+    const newUser = {
+      phone: phone.trim(),
+      password: hashedPassword,
+      isPremium: isPremium ?? false,
+      premiumExpiry: premiumExpiry ? new Date(premiumExpiry) : null,
+      createdAt: new Date()
+    };
 
-      // 🔐 পাসওয়ার্ড ইডিট ফিক্স: যদি নতুন পাসওয়ার্ড দেওয়া হয় তবেই হ্যাশ হবে
-      if (password && password.trim() !== '') {
-        const salt = await bcrypt.genSalt(10);
-        updateData.password = await bcrypt.hash(password, salt);
-      }
+    await db.collection("web_users").insertOne(newUser);
+    return NextResponse.json({ success: true, message: "নতুন ইউজার সফলভাবে তৈরি হয়েছে!" });
 
-      const result = await db.collection("web_users").updateOne(
-        { _id: objId },
-        { $set: updateData }
-      );
-
-      return NextResponse.json({ success: true, message: "ইউজারের তথ্য সফলভাবে আপডেট হয়েছে!" });
-    }
-
-    // 🌟 ৩. প্রিমিয়াম স্ট্যাটাস পরিবর্তন ও রিভোক (Toggle/Revoke Premium)
-    if (action === 'toggle_premium') {
-      // 🎯 স্ট্রিং ট্র্যাপ ফিক্স: স্ট্রিং বা বুলিয়ান যাই আসুক সঠিকভাবে কনভার্ট করবে
-      const premiumStatus = body.premiumStatus === true || body.premiumStatus === 'true';
-      let updateData: any = { isPremium: premiumStatus };
-      
-      if (premiumStatus) {
-        // ফ্রন্টএন্ড থেকে duration (দিন) পাঠালে সেটা সেট হবে, নয়তো ডিফল্ট ৩০ দিন
-        const days = body.duration ? parseInt(body.duration) : 30;
-        let expiry = new Date();
-        expiry.setDate(expiry.getDate() + days);
-        updateData.premiumExpiry = expiry;
-      } else {
-        // 🚫 প্রিমিয়াম রিকোভ/Revoke করলে মেয়াদ সম্পূর্ণ null (মুছে) হয়ে যাবে
-        updateData.premiumExpiry = null;
-      }
-
-      await db.collection("web_users").updateOne(
-        { _id: objId },
-        { $set: updateData }
-      );
-      
-      return NextResponse.json({ 
-        success: true, 
-        message: premiumStatus ? "প্রিমিয়াম সফলভাবে অন করা হয়েছে!" : "প্রিমিয়াম সফলভাবে বন্ধ করা হয়েছে!" 
-      });
-    }
-
-    return NextResponse.json({ success: false, message: "অবৈধ অ্যাকশন!" }, { status: 400 });
   } catch (error) {
-    console.error("Admin Action Error:", error);
-    return NextResponse.json({ success: false, message: "সার্ভার এরর! আবার চেষ্টা করুন।" }, { status: 500 });
+    return NextResponse.json({ success: false, message: "ইউজার তৈরি করতে সমস্যা হয়েছে!" }, { status: 500 });
+  }
+}
+
+// 🎯 ৩. ইউজার এডিট এবং পাসওয়ার্ড রিসেট করার জন্য (PUT Request)
+export async function PUT(req: Request) {
+  try {
+    const { id, phone, password, isPremium, premiumExpiry } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ success: false, message: "ইউজার আইডি প্রয়োজন!" }, { status: 400 });
+    }
+
+    const client = await clientPromise;
+    const db = client.db("all_in_one_reborn_db");
+    
+    const updateData: any = {
+      phone: phone?.trim(),
+      isPremium: isPremium,
+      premiumExpiry: premiumExpiry ? new Date(premiumExpiry) : null,
+      updatedAt: new Date()
+    };
+
+    // 🔐 পাসওয়ার্ড রিসেট ম্যাজিক: যদি অ্যাডমিন নতুন পাসওয়ার্ড ইনপুট দেয়, তবেই হ্যাশ হয়ে আপডেট হবে
+    if (password && password.trim() !== "") {
+      const salt = await bcrypt.genSalt(10);
+      updateData.password = await bcrypt.hash(password.trim(), salt);
+    }
+
+    const result = await db.collection("web_users").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json({ success: false, message: "ইউজার খুঁজে পাওয়া যায়নি!" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, message: "ইউজার প্রোফাইল সফলভাবে আপডেট হয়েছে!" });
+
+  } catch (error) {
+    return NextResponse.json({ success: false, message: "আপডেট করতে সমস্যা হয়েছে!" }, { status: 500 });
+  }
+}
+
+// 🎯 ৪. ইউজার ডিলিট করার জন্য (DELETE Request)
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ success: false, message: "ইউজার আইডি প্রয়োজন!" }, { status: 400 });
+    }
+
+    const client = await clientPromise;
+    const db = client.db("all_in_one_reborn_db");
+
+    const result = await db.collection("web_users").deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return NextResponse.json({ success: false, message: "ইউজার খুঁজে পাওয়া যায়নি!" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, message: "ইউজার সফলভাবে ডিলিট করা হয়েছে!" });
+
+  } catch (error) {
+    return NextResponse.json({ success: false, message: "ডিলিট করতে সমস্যা হয়েছে!" }, { status: 500 });
   }
 }
