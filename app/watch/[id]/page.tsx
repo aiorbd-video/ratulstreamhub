@@ -17,7 +17,7 @@ export default function WatchPage() {
   const [errorMsg, setErrorMsg] = useState('');
   
   // 🎯 আপনার টেলিগ্রাম বটের ইউজারনেম এখানে দিন
-  const TELEGRAM_BOT_USERNAME = "YOUR_BOT_USERNAME_HERE"; 
+  const TELEGRAM_BOT_USERNAME = "ratulnotific_bot"; 
 
   useEffect(() => {
     fetch(`/api/watch/${shortId}`)
