@@ -1,11 +1,10 @@
-// ফাইল পাথ: app/watch/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-// @ts-ignore (এরর এড়ানোর জন্য এটি দেওয়া হলো)
+// @ts-ignore
 import dashjs from 'dashjs';
 import Link from 'next/link';
 
@@ -41,27 +40,23 @@ export default function WatchPage() {
     let hls: Hls;
     let dashPlayer: any;
 
-    // 🌐 HLS (m3u8) Header Setup
-    const customHlsConfig = {
-      xhrSetup: function (xhr: any) {
-        const { referer, origin, cookie, userAgent } = streamData.headers || {};
-        if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
-        if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
-        if (referer) xhr.setRequestHeader('X-Referer', referer);
-        if (origin) xhr.setRequestHeader('X-Origin', origin);
-      }
-    };
+    const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
+    
+    // 🎯 Proxy URL তৈরি (যেটা আমরা নতুন API তে পাঠাবো)
+    const proxyUrl = `/api/proxy?url=${encodeURIComponent(streamData.streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}&cookie=${encodeURIComponent(cookie)}&userAgent=${encodeURIComponent(userAgent)}`;
+
+    // 🎯 টাইপ ডিটেকশন ফিক্স
+    const isDash = streamData.stream_type === 'dash';
 
     art = new Artplayer({
       container: playerRef.current,
-      url: streamData.streamUrl,
-      // 🎯 ফিক্স: প্লেয়ারকে বলে দিচ্ছি এটা কোন টাইপের ফাইল
-      type: streamData.stream_type === 'dash' || streamData.streamUrl.includes('.mpd') ? 'mpd' : 'm3u8',
+      url: proxyUrl, // 🎯 ডাইরেক্ট লিংকের বদলে প্রক্সি লিংক
+      type: isDash ? 'mpd' : 'm3u8',
       poster: streamData.logo,
       volume: 0.8,
       isLive: true,
       autoplay: true,
-      muted: false,
+      muted: true, // 🎯 Chrome Autoplay Block Fix
       pip: true,
       autoMini: true,
       setting: true,
@@ -75,12 +70,18 @@ export default function WatchPage() {
       
       customType: {
         // ==========================================
-        // 🟢 HLS (m3u8) সাপোর্ট
+        // 🟢 HLS (m3u8) Proxy & Recovery Setup
         // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
             if (hls) hls.destroy();
-            hls = new Hls(customHlsConfig);
+            
+            // XHR Headers আর দরকার নেই, কারণ প্রক্সি সব হ্যান্ডেল করছে
+            hls = new Hls({
+              lowLatencyMode: true,
+              maxBufferLength: 30,
+            });
+            
             hls.loadSource(url);
             hls.attachMedia(video);
             
@@ -92,31 +93,48 @@ export default function WatchPage() {
                 }));
                 qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-                artInstance.setting.add({
-                  name: 'quality',
-                  width: 200,
-                  html: 'Quality',
-                  tooltip: 'Auto',
-                  selector: qualityOptions.map(q => ({
-                    html: q.html,
-                    value: q.level,
-                    default: q.level === -1
-                  })),
-                  onSelect: function (item: any) {
-                    hls.currentLevel = Number(item.value);
-                    return item.html;
-                  },
-                });
+                // 🎯 Memory Leak / Duplicate Fix
+                const qualitySetting = artInstance.setting.settings.find(s => s.name === 'quality');
+                if (!qualitySetting) {
+                  artInstance.setting.add({
+                    name: 'quality',
+                    width: 200,
+                    html: 'Quality',
+                    tooltip: 'Auto',
+                    selector: qualityOptions.map(q => ({
+                      html: q.html,
+                      value: q.level,
+                      default: q.level === -1
+                    })),
+                    onSelect: function (item: any) {
+                      hls.currentLevel = Number(item.value);
+                      return item.html;
+                    },
+                  });
+                }
               }
             });
 
+            // 🎯 Advanced HLS Error Recovery
             hls.on(Hls.Events.ERROR, function (event, data) {
               if (data.fatal) {
-                art.notice.show = "⚠️ Stream Failed! Redirecting...";
-                setTimeout(() => {
-                  setErrorMsg('লাইভ স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে। নতুন লিংকের জন্য টেলিগ্রাম বটে যান!');
-                  artInstance.destroy(false);
-                }, 2000);
+                switch (data.type) {
+                  case Hls.ErrorTypes.NETWORK_ERROR:
+                    console.warn("HLS Network Error, trying to recover...");
+                    hls.startLoad();
+                    break;
+                  case Hls.ErrorTypes.MEDIA_ERROR:
+                    console.warn("HLS Media Error, trying to recover...");
+                    hls.recoverMediaError();
+                    break;
+                  default:
+                    art.notice.show = `⚠️ Stream Fatal Error: ${data.details}`;
+                    hls.destroy();
+                    setTimeout(() => {
+                      setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে। নতুন লিংকের জন্য বটে যান!');
+                    }, 3000);
+                    break;
+                }
               }
             });
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -125,28 +143,22 @@ export default function WatchPage() {
         },
 
         // ==========================================
-        // 🔵 DASH (mpd) এবং Clearkey DRM সাপোর্ট
+        // 🔵 DASH (mpd) & DRM Proxy Setup
         // ==========================================
         mpd: function (video, url, artInstance) {
           dashPlayer = dashjs.MediaPlayer().create();
           
-          // 🎯 হেডার ইন্টিগ্রেশন (Referer, Cookie)
-          dashPlayer.extend("RequestModifier", function () {
-            return {
-              modifyRequestHeader: function (xhr: any) {
-                const { referer, origin, cookie, userAgent } = streamData.headers || {};
-                if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
-                if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
-                if (referer) xhr.setRequestHeader('X-Referer', referer);
-                if (origin) xhr.setRequestHeader('X-Origin', origin);
-                return xhr;
-              }
-            };
-          }, true);
+          // 🎯 Better DASH Settings
+          dashPlayer.updateSettings({
+            streaming: {
+              xhrWithCredentials: true,
+              lowLatencyEnabled: true,
+            }
+          });
 
           dashPlayer.initialize(video, url, true);
 
-          // 🔐 Clearkey DRM সেটআপ (যদি বট থেকে দেওয়া হয়)
+          // 🎯 Safer Clearkey DRM Format
           if (streamData.drm_key_id && streamData.drm_key) {
             dashPlayer.setProtectionData({
               "org.w3.clearkey": {
@@ -158,16 +170,11 @@ export default function WatchPage() {
           }
 
           dashPlayer.on(dashjs.MediaPlayer.events.ERROR, function (e: any) {
-            if (e.error === "download" && e.event.id === "manifest") {
-                art.notice.show = "⚠️ DRM/Stream Failed!";
-                setTimeout(() => {
-                  setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!');
-                }, 2000);
-            }
-          });
-
-          artInstance.on('destroy', () => {
-            dashPlayer.reset();
+            console.error("DASH Error Details:", e);
+            art.notice.show = `⚠️ Error: ${e.error?.message || e.error || 'Network Error'}`;
+            setTimeout(() => {
+              setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!');
+            }, 3000);
           });
         }
       },
@@ -183,7 +190,6 @@ export default function WatchPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-2 md:p-6">
       <div className="w-full max-w-[1400px] bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl">
-        
         <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm">
           <h1 className="text-sm md:text-lg font-bold flex items-center gap-2 line-clamp-1 max-w-[70%]">
             <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse flex-shrink-0"></span>
@@ -195,7 +201,6 @@ export default function WatchPage() {
         </div>
 
         <div className="relative w-full aspect-video md:h-[75vh] md:aspect-auto bg-black flex items-center justify-center">
-          
           {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-20">
               <div className="w-10 h-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-3"></div>
