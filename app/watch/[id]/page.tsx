@@ -163,7 +163,7 @@ export default function WatchPage() {
               <p className="text-xs text-slate-400 mb-5 max-w-md">{errorMsg}</p>
               
               <a 
-                href={`https://t.me/${TELEGRAM_BOT_USERNAME}?start=${shortId}`} 
+                href={`https://t.me/${ratulnotific_bot}?start=${shortId}`} 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-[#0088cc] hover:bg-[#0077b3] text-white text-sm font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2 animate-bounce"
