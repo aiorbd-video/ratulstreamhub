@@ -1,4 +1,4 @@
-// ফাইল পাথ: app/watch/[id]/page.tsx
+// ফাইল পাথ: app/watch/[id]/page.tsx 
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
