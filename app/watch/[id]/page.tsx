@@ -1,3 +1,4 @@
+// ফাইল পাথ: app/watch/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -5,7 +6,7 @@ import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
 // @ts-ignore
-import dashjs from 'dashjs';
+import shaka from 'shaka-player/dist/shaka-player.compiled';
 import Link from 'next/link';
 
 export default function WatchPage() {
@@ -17,6 +18,7 @@ export default function WatchPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   
+  // 🎯 আপনার টেলিগ্রাম বটের আসল ইউজারনেম
   const TELEGRAM_BOT_USERNAME = "ratulnotific_bot"; 
 
   useEffect(() => {
@@ -38,17 +40,18 @@ export default function WatchPage() {
 
     let art: Artplayer;
     let hls: Hls;
-    let dashPlayer: any;
+    let shakaPlayer: any;
 
     const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
     
-    // 🎯 Cloudflare Proxy Logic: প্রক্সি থাকলে লিংকের আগে বসবে, না থাকলে ডাইরেক্ট প্লে হবে
+    // 🎯 Cloudflare Proxy Logic (প্রক্সি থাকলে প্রক্সি, না থাকলে ডাইরেক্ট)
     const finalStreamUrl = streamData.proxy_url 
         ? `${streamData.proxy_url}${streamData.streamUrl}` 
         : streamData.streamUrl;
 
     const isDash = streamData.stream_type === 'dash';
 
+    // 🌟 Enterprise Artplayer Configuration
     art = new Artplayer({
       container: playerRef.current,
       url: finalStreamUrl, 
@@ -56,8 +59,16 @@ export default function WatchPage() {
       poster: streamData.logo,
       volume: 0.8,
       isLive: true,
+      muted: true, // Auto-play পলিসির জন্য মিউট
       autoplay: true,
-      muted: true, // 🎯 Chrome Autoplay-এর জন্য মিউট করে শুরু
+      
+      // 📱 Mobile & TV Controls
+      playsInline: true,
+      autoOrientation: true, // মোবাইল ল্যান্ডস্কেপ করলে অটো ফুলস্ক্রিন
+      fastForward: true, // লং প্রেসে 3x স্পিড
+      lock: true, // মোবাইল স্ক্রিন লক বাটন
+      airplay: true, // Apple Airplay সাপোর্ট
+      
       pip: true,
       autoMini: true,
       setting: true,
@@ -65,16 +76,17 @@ export default function WatchPage() {
       aspectRatio: true,  
       fullscreen: true,
       fullscreenWeb: true,
-      lock: true,
       hotkey: true,
       theme: '#ef4444',
       
       customType: {
+        // ==========================================
+        // 🟢 HLS (m3u8) ইঞ্জিন - Powered by Hls.js
+        // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
             if (hls) hls.destroy();
             
-            // 🎯 হেডার পাসিং (যদি ডাইরেক্ট প্লে হয় বা আপনার CF Worker 헤더 সাপোর্ট করে)
             hls = new Hls({
               lowLatencyMode: true,
               maxBufferLength: 30,
@@ -128,7 +140,7 @@ export default function WatchPage() {
                     hls.recoverMediaError();
                     break;
                   default:
-                    art.notice.show = `⚠️ Stream Error: ${data.details}`;
+                    artInstance.notice.show = `⚠️ Stream Error: ${data.details}`;
                     hls.destroy();
                     setTimeout(() => setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।'), 3000);
                     break;
@@ -140,52 +152,106 @@ export default function WatchPage() {
           }
         },
 
-        mpd: function (video, url, artInstance) {
-          dashPlayer = dashjs.MediaPlayer().create();
-          
-          dashPlayer.updateSettings({
+        // ==========================================
+        // 🔵 DASH (mpd) & DRM ইঞ্জিন - Powered by Shaka
+        // ==========================================
+        mpd: async function (video, url, artInstance) {
+          shaka.polyfill.installAll();
+
+          if (!shaka.Player.isBrowserSupported()) {
+            artInstance.notice.show = "⚠️ Browser not supported for DASH!";
+            return;
+          }
+
+          shakaPlayer = new shaka.Player(video);
+
+          // হেডার প্রক্সি
+          shakaPlayer.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
+            if (userAgent) request.headers['X-User-Agent'] = userAgent;
+            if (cookie) request.headers['X-Cookie'] = cookie;
+          });
+
+          // 🎯 Anti-Buffering Configuration
+          const shakaConfig: any = {
+            abr: { enabled: true, defaultBandwidthEstimate: 1000000 },
             streaming: {
-              xhrWithCredentials: true,
-              lowLatencyEnabled: true,
+              bufferingGoal: 10,
+              rebufferingGoal: 2,
+              bufferBehind: 30,
+              retryParameters: { maxAttempts: 5, baseDelay: 1000 }
+            },
+            manifest: { retryParameters: { maxAttempts: 5 } }
+          };
+
+          // 🔐 Clearkey DRM 
+          if (streamData.drm_key_id && streamData.drm_key) {
+            shakaConfig.drm = {
+              clearKeys: {
+                [streamData.drm_key_id]: streamData.drm_key
+              }
+            };
+          }
+
+          shakaPlayer.configure(shakaConfig);
+
+          shakaPlayer.addEventListener('error', (event: any) => {
+            console.error("Shaka Error Details:", event.detail);
+            if (event.detail.severity === shaka.util.Error.Severity.CRITICAL) {
+              artInstance.notice.show = `⚠️ DRM/Stream Error: ${event.detail.code}`;
+              setTimeout(() => setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!'), 3000);
             }
           });
 
-          // 🎯 DASH Header Support
-          dashPlayer.extend("RequestModifier", function () {
-            return {
-              modifyRequestHeader: function (xhr: any) {
-                if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
-                if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
-                if (referer) xhr.setRequestHeader('X-Referer', referer);
-                if (origin) xhr.setRequestHeader('X-Origin', origin);
-                return xhr;
-              }
-            };
-          }, true);
+          try {
+            await shakaPlayer.load(url);
+            
+            // 🎯 Shaka Quality Control in Artplayer Menu
+            const tracks = shakaPlayer.getVariantTracks();
+            if (tracks.length > 0) {
+              const resolutions = Array.from(new Set(tracks.map((t: any) => t.height))).sort((a: any, b: any) => b - a);
+              const qualityOptions = resolutions.map(h => ({
+                html: h ? `${h}p` : 'Unknown',
+                level: h
+              }));
+              qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-          dashPlayer.initialize(video, url, true);
-
-          if (streamData.drm_key_id && streamData.drm_key) {
-            dashPlayer.setProtectionData({
-              "org.w3.clearkey": {
-                "clearkeys": {
-                  [streamData.drm_key_id]: streamData.drm_key
-                }
+              const qualitySetting = artInstance.setting.settings.find(s => s.name === 'quality');
+              if (!qualitySetting) {
+                artInstance.setting.add({
+                  name: 'quality',
+                  width: 200,
+                  html: 'Quality',
+                  tooltip: 'Auto',
+                  selector: qualityOptions.map(q => ({
+                    html: q.html,
+                    value: q.level,
+                    default: q.level === -1
+                  })),
+                  onSelect: function (item: any) {
+                    const targetHeight = Number(item.value);
+                    if (targetHeight === -1) {
+                      shakaPlayer.configure({ abr: { enabled: true } });
+                    } else {
+                      shakaPlayer.configure({ abr: { enabled: false } });
+                      const track = shakaPlayer.getVariantTracks().find((t: any) => t.height === targetHeight);
+                      if (track) shakaPlayer.selectVariantTrack(track, true);
+                    }
+                    return item.html;
+                  },
+                });
               }
-            });
+            }
+          } catch (e: any) {
+            console.error("Shaka Load Error:", e);
           }
-
-          dashPlayer.on(dashjs.MediaPlayer.events.ERROR, function (e: any) {
-            art.notice.show = `⚠️ Error: ${e.error?.message || e.error || 'Network Error'}`;
-            setTimeout(() => setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!'), 3000);
-          });
         }
       },
     });
 
+    // 🧹 Cleanup on Unmount
     return () => {
       if (hls) hls.destroy();
-      if (dashPlayer) dashPlayer.reset();
+      if (shakaPlayer) shakaPlayer.destroy();
       if (art && art.destroy) art.destroy(false);
     };
   }, [streamData]);
@@ -193,7 +259,9 @@ export default function WatchPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-2 md:p-6">
       <div className="w-full max-w-[1400px] bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl">
-        <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm">
+        
+        {/* Header Bar */}
+        <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm z-10 relative">
           <h1 className="text-sm md:text-lg font-bold flex items-center gap-2 line-clamp-1 max-w-[70%]">
             <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse flex-shrink-0"></span>
             {streamData ? streamData.title : 'Live Stream'}
@@ -203,7 +271,9 @@ export default function WatchPage() {
           </Link>
         </div>
 
-        <div className="relative w-full aspect-video md:h-[75vh] md:aspect-auto bg-black flex items-center justify-center">
+        {/* Player Container */}
+        <div className="relative w-full aspect-video md:h-[75vh] md:aspect-auto bg-black flex items-center justify-center overflow-hidden">
+          
           {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-20">
               <div className="w-10 h-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-3"></div>
@@ -229,6 +299,7 @@ export default function WatchPage() {
             </div>
           )}
 
+          {/* Artplayer Target Div */}
           {!errorMsg && <div ref={playerRef} className="w-full h-full"></div>}
         </div>
       </div>
