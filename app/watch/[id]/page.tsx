@@ -42,21 +42,22 @@ export default function WatchPage() {
 
     const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
     
-    // 🎯 Proxy URL তৈরি (যেটা আমরা নতুন API তে পাঠাবো)
-    const proxyUrl = `/api/proxy?url=${encodeURIComponent(streamData.streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}&cookie=${encodeURIComponent(cookie)}&userAgent=${encodeURIComponent(userAgent)}`;
+    // 🎯 Cloudflare Proxy Logic: প্রক্সি থাকলে লিংকের আগে বসবে, না থাকলে ডাইরেক্ট প্লে হবে
+    const finalStreamUrl = streamData.proxy_url 
+        ? `${streamData.proxy_url}${streamData.streamUrl}` 
+        : streamData.streamUrl;
 
-    // 🎯 টাইপ ডিটেকশন ফিক্স
     const isDash = streamData.stream_type === 'dash';
 
     art = new Artplayer({
       container: playerRef.current,
-      url: proxyUrl, // 🎯 ডাইরেক্ট লিংকের বদলে প্রক্সি লিংক
+      url: finalStreamUrl, 
       type: isDash ? 'mpd' : 'm3u8',
       poster: streamData.logo,
       volume: 0.8,
       isLive: true,
       autoplay: true,
-      muted: true, // 🎯 Chrome Autoplay Block Fix
+      muted: true, // 🎯 Chrome Autoplay-এর জন্য মিউট করে শুরু
       pip: true,
       autoMini: true,
       setting: true,
@@ -69,17 +70,20 @@ export default function WatchPage() {
       theme: '#ef4444',
       
       customType: {
-        // ==========================================
-        // 🟢 HLS (m3u8) Proxy & Recovery Setup
-        // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
             if (hls) hls.destroy();
             
-            // XHR Headers আর দরকার নেই, কারণ প্রক্সি সব হ্যান্ডেল করছে
+            // 🎯 হেডার পাসিং (যদি ডাইরেক্ট প্লে হয় বা আপনার CF Worker 헤더 সাপোর্ট করে)
             hls = new Hls({
               lowLatencyMode: true,
               maxBufferLength: 30,
+              xhrSetup: function (xhr: any) {
+                if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
+                if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
+                if (referer) xhr.setRequestHeader('X-Referer', referer);
+                if (origin) xhr.setRequestHeader('X-Origin', origin);
+              }
             });
             
             hls.loadSource(url);
@@ -93,7 +97,6 @@ export default function WatchPage() {
                 }));
                 qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-                // 🎯 Memory Leak / Duplicate Fix
                 const qualitySetting = artInstance.setting.settings.find(s => s.name === 'quality');
                 if (!qualitySetting) {
                   artInstance.setting.add({
@@ -115,24 +118,19 @@ export default function WatchPage() {
               }
             });
 
-            // 🎯 Advanced HLS Error Recovery
             hls.on(Hls.Events.ERROR, function (event, data) {
               if (data.fatal) {
                 switch (data.type) {
                   case Hls.ErrorTypes.NETWORK_ERROR:
-                    console.warn("HLS Network Error, trying to recover...");
                     hls.startLoad();
                     break;
                   case Hls.ErrorTypes.MEDIA_ERROR:
-                    console.warn("HLS Media Error, trying to recover...");
                     hls.recoverMediaError();
                     break;
                   default:
-                    art.notice.show = `⚠️ Stream Fatal Error: ${data.details}`;
+                    art.notice.show = `⚠️ Stream Error: ${data.details}`;
                     hls.destroy();
-                    setTimeout(() => {
-                      setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে। নতুন লিংকের জন্য বটে যান!');
-                    }, 3000);
+                    setTimeout(() => setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।'), 3000);
                     break;
                 }
               }
@@ -142,13 +140,9 @@ export default function WatchPage() {
           }
         },
 
-        // ==========================================
-        // 🔵 DASH (mpd) & DRM Proxy Setup
-        // ==========================================
         mpd: function (video, url, artInstance) {
           dashPlayer = dashjs.MediaPlayer().create();
           
-          // 🎯 Better DASH Settings
           dashPlayer.updateSettings({
             streaming: {
               xhrWithCredentials: true,
@@ -156,9 +150,21 @@ export default function WatchPage() {
             }
           });
 
+          // 🎯 DASH Header Support
+          dashPlayer.extend("RequestModifier", function () {
+            return {
+              modifyRequestHeader: function (xhr: any) {
+                if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
+                if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
+                if (referer) xhr.setRequestHeader('X-Referer', referer);
+                if (origin) xhr.setRequestHeader('X-Origin', origin);
+                return xhr;
+              }
+            };
+          }, true);
+
           dashPlayer.initialize(video, url, true);
 
-          // 🎯 Safer Clearkey DRM Format
           if (streamData.drm_key_id && streamData.drm_key) {
             dashPlayer.setProtectionData({
               "org.w3.clearkey": {
@@ -170,11 +176,8 @@ export default function WatchPage() {
           }
 
           dashPlayer.on(dashjs.MediaPlayer.events.ERROR, function (e: any) {
-            console.error("DASH Error Details:", e);
             art.notice.show = `⚠️ Error: ${e.error?.message || e.error || 'Network Error'}`;
-            setTimeout(() => {
-              setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!');
-            }, 3000);
+            setTimeout(() => setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!'), 3000);
           });
         }
       },
