@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
+// @ts-ignore (এরর এড়ানোর জন্য এটি দেওয়া হলো)
+import dashjs from 'dashjs';
 import Link from 'next/link';
 
 export default function WatchPage() {
@@ -16,7 +18,6 @@ export default function WatchPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   
-  // 🎯 আপনার টেলিগ্রাম বটের ইউজারনেম এখানে দিন
   const TELEGRAM_BOT_USERNAME = "ratulnotific_bot"; 
 
   useEffect(() => {
@@ -38,10 +39,12 @@ export default function WatchPage() {
 
     let art: Artplayer;
     let hls: Hls;
+    let dashPlayer: any;
 
+    // 🌐 HLS (m3u8) Header Setup
     const customHlsConfig = {
       xhrSetup: function (xhr: any) {
-        const { referer, origin, cookie, userAgent } = streamData.headers;
+        const { referer, origin, cookie, userAgent } = streamData.headers || {};
         if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
         if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
         if (referer) xhr.setRequestHeader('X-Referer', referer);
@@ -52,6 +55,8 @@ export default function WatchPage() {
     art = new Artplayer({
       container: playerRef.current,
       url: streamData.streamUrl,
+      // 🎯 ফিক্স: প্লেয়ারকে বলে দিচ্ছি এটা কোন টাইপের ফাইল
+      type: streamData.stream_type === 'dash' || streamData.streamUrl.includes('.mpd') ? 'mpd' : 'm3u8',
       poster: streamData.logo,
       volume: 0.8,
       isLive: true,
@@ -59,11 +64,9 @@ export default function WatchPage() {
       muted: false,
       pip: true,
       autoMini: true,
-      
       setting: true,
       playbackRate: true, 
       aspectRatio: true,  
-      
       fullscreen: true,
       fullscreenWeb: true,
       lock: true,
@@ -71,6 +74,9 @@ export default function WatchPage() {
       theme: '#ef4444',
       
       customType: {
+        // ==========================================
+        // 🟢 HLS (m3u8) সাপোর্ট
+        // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
             if (hls) hls.destroy();
@@ -96,7 +102,6 @@ export default function WatchPage() {
                     value: q.level,
                     default: q.level === -1
                   })),
-                  // 🎯 ফিক্স: item: any দেওয়া হলো এবং Number() দিয়ে ভ্যালু কনভার্ট করা হলো
                   onSelect: function (item: any) {
                     hls.currentLevel = Number(item.value);
                     return item.html;
@@ -110,26 +115,68 @@ export default function WatchPage() {
                 art.notice.show = "⚠️ Stream Failed! Redirecting...";
                 setTimeout(() => {
                   setErrorMsg('লাইভ স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে। নতুন লিংকের জন্য টেলিগ্রাম বটে যান!');
-                  art.destroy(false);
+                  artInstance.destroy(false);
                 }, 2000);
               }
             });
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = url;
-          } else {
-            art.notice.show = 'Unsupported video format';
           }
+        },
+
+        // ==========================================
+        // 🔵 DASH (mpd) এবং Clearkey DRM সাপোর্ট
+        // ==========================================
+        mpd: function (video, url, artInstance) {
+          dashPlayer = dashjs.MediaPlayer().create();
+          
+          // 🎯 হেডার ইন্টিগ্রেশন (Referer, Cookie)
+          dashPlayer.extend("RequestModifier", function () {
+            return {
+              modifyRequestHeader: function (xhr: any) {
+                const { referer, origin, cookie, userAgent } = streamData.headers || {};
+                if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
+                if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
+                if (referer) xhr.setRequestHeader('X-Referer', referer);
+                if (origin) xhr.setRequestHeader('X-Origin', origin);
+                return xhr;
+              }
+            };
+          }, true);
+
+          dashPlayer.initialize(video, url, true);
+
+          // 🔐 Clearkey DRM সেটআপ (যদি বট থেকে দেওয়া হয়)
+          if (streamData.drm_key_id && streamData.drm_key) {
+            dashPlayer.setProtectionData({
+              "org.w3.clearkey": {
+                "clearkeys": {
+                  [streamData.drm_key_id]: streamData.drm_key
+                }
+              }
+            });
+          }
+
+          dashPlayer.on(dashjs.MediaPlayer.events.ERROR, function (e: any) {
+            if (e.error === "download" && e.event.id === "manifest") {
+                art.notice.show = "⚠️ DRM/Stream Failed!";
+                setTimeout(() => {
+                  setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!');
+                }, 2000);
+            }
+          });
+
+          artInstance.on('destroy', () => {
+            dashPlayer.reset();
+          });
         }
       },
     });
 
     return () => {
-      if (hls) {
-        hls.destroy();
-      }
-      if (art && art.destroy) {
-        art.destroy(false);
-      }
+      if (hls) hls.destroy();
+      if (dashPlayer) dashPlayer.reset();
+      if (art && art.destroy) art.destroy(false);
     };
   }, [streamData]);
 
@@ -163,7 +210,7 @@ export default function WatchPage() {
               <p className="text-xs text-slate-400 mb-5 max-w-md">{errorMsg}</p>
               
               <a 
-                href={`https://t.me/${ratulnotific_bot}?start=${shortId}`} 
+                href={`https://t.me/${TELEGRAM_BOT_USERNAME}?start=${shortId}`} 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-[#0088cc] hover:bg-[#0077b3] text-white text-sm font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2 animate-bounce"
@@ -180,4 +227,3 @@ export default function WatchPage() {
     </div>
   );
 }
-
