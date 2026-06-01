@@ -1,4 +1,3 @@
-// ফাইল পাথ: app/watch/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -43,15 +42,19 @@ export default function WatchPage() {
 
     const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
     
-    const finalStreamUrl = streamData.proxy_url 
-        ? `${streamData.proxy_url}${streamData.streamUrl}` 
-        : streamData.streamUrl;
+    // 🎯 Smart Proxy URL Builder (CF Worker-এর জন্য)
+    // এটি আপনার HTML কোডের মতোই ?url=... &ref=... জেনারেট করবে
+    const fallbackProxyUrl = streamData.proxy_url 
+      ? (streamData.proxy_url.includes('?') 
+          ? `${streamData.proxy_url}${encodeURIComponent(streamData.streamUrl)}${referer ? `&ref=${encodeURIComponent(referer)}` : ''}`
+          : `${streamData.proxy_url}?url=${encodeURIComponent(streamData.streamUrl)}${referer ? `&ref=${encodeURIComponent(referer)}` : ''}`)
+      : '';
 
     const isDash = streamData.stream_type === 'dash';
 
     art = new Artplayer({
       container: playerRef.current,
-      url: finalStreamUrl, 
+      url: streamData.streamUrl, // প্রথমে Direct ট্রাই করবে
       type: isDash ? 'mpd' : 'm3u8',
       poster: streamData.logo,
       volume: 0.8,
@@ -76,76 +79,98 @@ export default function WatchPage() {
       theme: '#ef4444',
       
       customType: {
+        // ==========================================
+        // 🟢 HLS (m3u8) Smart Fallback Logic
+        // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
-            if (hls) hls.destroy();
-            
-            hls = new Hls({
-              lowLatencyMode: true,
-              maxBufferLength: 30,
-              xhrSetup: function (xhr: any) {
-                if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
-                if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
-                if (referer) xhr.setRequestHeader('X-Referer', referer);
-                if (origin) xhr.setRequestHeader('X-Origin', origin);
-              }
-            });
-            
-            hls.loadSource(url);
-            hls.attachMedia(video);
-            
-            hls.on(Hls.Events.MANIFEST_PARSED, function () {
-              if (hls.levels.length > 1) {
-                const qualityOptions = hls.levels.map((level, index) => ({
-                  html: (level.height ? level.height + 'p' : 'Quality ' + (index + 1)),
-                  level: index,
-                }));
-                qualityOptions.unshift({ html: 'Auto', level: -1 });
+            let isProxyFallback = false;
 
-                // 🎯 ফিক্স: TypeScript error fix করা হয়েছে
-                const qualitySetting = artInstance.setting.find('quality');
-                if (!qualitySetting) {
-                  artInstance.setting.add({
-                    name: 'quality',
-                    width: 200,
-                    html: 'Quality',
-                    tooltip: 'Auto',
-                    selector: qualityOptions.map(q => ({
-                      html: q.html,
-                      value: q.level,
-                      default: q.level === -1
-                    })),
-                    onSelect: function (item: any) {
-                      hls.currentLevel = Number(item.value);
-                      return item.html;
-                    },
-                  });
+            const loadHls = (targetUrl: string, isProxy: boolean) => {
+              if (hls) hls.destroy();
+              
+              hls = new Hls({
+                lowLatencyMode: true,
+                maxBufferLength: 30,
+                fragLoadingTimeOut: 15000,
+                manifestLoadingTimeOut: 12000,
+                xhrSetup: function (xhr: any) {
+                  if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
+                  if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
                 }
-              }
-            });
+              });
+              
+              hls.loadSource(targetUrl);
+              hls.attachMedia(video);
+              
+              hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                artInstance.notice.show = isProxy ? "🟢 Playing via Proxy" : "🟢 Playing Direct";
+                if (hls.levels.length > 1) {
+                  const qualityOptions = hls.levels.map((level, index) => ({
+                    html: (level.height ? level.height + 'p' : 'Quality ' + (index + 1)),
+                    level: index,
+                  }));
+                  qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-            hls.on(Hls.Events.ERROR, function (event, data) {
-              if (data.fatal) {
-                switch (data.type) {
-                  case Hls.ErrorTypes.NETWORK_ERROR:
-                    hls.startLoad();
-                    break;
-                  case Hls.ErrorTypes.MEDIA_ERROR:
-                    hls.recoverMediaError();
-                    break;
-                  default:
-                    artInstance.notice.show = `⚠️ Stream Error: ${data.details}`;
-                    hls.destroy();
-                    setTimeout(() => setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।'), 3000);
-                    break;
+                  const qualitySetting = artInstance.setting.find('quality');
+                  if (!qualitySetting) {
+                    artInstance.setting.add({
+                      name: 'quality',
+                      width: 200,
+                      html: 'Quality',
+                      tooltip: 'Auto',
+                      selector: qualityOptions.map(q => ({
+                        html: q.html,
+                        value: q.level,
+                        default: q.level === -1
+                      })),
+                      onSelect: function (item: any) {
+                        hls.currentLevel = Number(item.value);
+                        return item.html;
+                      },
+                    });
+                  }
                 }
-              }
-            });
+              });
+
+              hls.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                  switch (data.type) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                      // 🎯 Direct Fail করলে Auto-Fallback টু Proxy
+                      if (!isProxy && fallbackProxyUrl && !isProxyFallback) {
+                        isProxyFallback = true;
+                        console.warn("Direct blocked (CORS/403) → Handing off to Proxy");
+                        artInstance.notice.show = "🔄 Direct Failed! Switching to Proxy...";
+                        loadHls(fallbackProxyUrl, true);
+                      } else {
+                        hls.startLoad();
+                      }
+                      break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                      hls.recoverMediaError();
+                      break;
+                    default:
+                      artInstance.notice.show = `⚠️ Stream Error: ${data.details}`;
+                      hls.destroy();
+                      setTimeout(() => setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।'), 3000);
+                      break;
+                  }
+                }
+              });
+            };
+
+            // 🚀 Start Process: Initially try Direct URL
+            loadHls(url, false);
+
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = url;
           }
         },
 
+        // ==========================================
+        // 🔵 DASH (mpd) Smart Fallback Logic
+        // ==========================================
         mpd: async function (video, url, artInstance) {
           shaka.polyfill.installAll();
 
@@ -154,6 +179,7 @@ export default function WatchPage() {
             return;
           }
 
+          let isProxyFallback = false;
           shakaPlayer = new shaka.Player(video);
 
           shakaPlayer.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
@@ -167,71 +193,83 @@ export default function WatchPage() {
               bufferingGoal: 10,
               rebufferingGoal: 2,
               bufferBehind: 30,
-              retryParameters: { maxAttempts: 5, baseDelay: 1000 }
+              retryParameters: { maxAttempts: 3, baseDelay: 1000 }
             },
-            manifest: { retryParameters: { maxAttempts: 5 } }
+            manifest: { retryParameters: { maxAttempts: 3 } }
           };
 
           if (streamData.drm_key_id && streamData.drm_key) {
             shakaConfig.drm = {
-              clearKeys: {
-                [streamData.drm_key_id]: streamData.drm_key
-              }
+              clearKeys: { [streamData.drm_key_id]: streamData.drm_key }
             };
           }
 
           shakaPlayer.configure(shakaConfig);
 
           shakaPlayer.addEventListener('error', (event: any) => {
-            console.error("Shaka Error Details:", event.detail);
             if (event.detail.severity === shaka.util.Error.Severity.CRITICAL) {
-              artInstance.notice.show = `⚠️ DRM/Stream Error: ${event.detail.code}`;
-              setTimeout(() => setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!'), 3000);
+              if (isProxyFallback || !fallbackProxyUrl) {
+                artInstance.notice.show = `⚠️ DRM/Stream Error`;
+                setTimeout(() => setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!'), 3000);
+              }
             }
           });
 
-          try {
-            await shakaPlayer.load(url);
-            
-            const tracks = shakaPlayer.getVariantTracks();
-            if (tracks.length > 0) {
-              const resolutions = Array.from(new Set(tracks.map((t: any) => t.height))).sort((a: any, b: any) => b - a);
-              const qualityOptions = resolutions.map(h => ({
-                html: h ? `${h}p` : 'Unknown',
-                level: h
-              }));
-              qualityOptions.unshift({ html: 'Auto', level: -1 });
+          const loadDash = async (targetUrl: string, isProxy: boolean) => {
+            try {
+              await shakaPlayer.load(targetUrl);
+              artInstance.notice.show = isProxy ? "🟢 Playing via Proxy" : "🟢 Playing Direct";
+              
+              const tracks = shakaPlayer.getVariantTracks();
+              if (tracks.length > 0) {
+                const resolutions = Array.from(new Set(tracks.map((t: any) => t.height))).sort((a: any, b: any) => b - a);
+                const qualityOptions = resolutions.map(h => ({
+                  html: h ? `${h}p` : 'Unknown',
+                  level: h
+                }));
+                qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-              // 🎯 ফিক্স: TypeScript error fix করা হয়েছে
-              const qualitySetting = artInstance.setting.find('quality');
-              if (!qualitySetting) {
-                artInstance.setting.add({
-                  name: 'quality',
-                  width: 200,
-                  html: 'Quality',
-                  tooltip: 'Auto',
-                  selector: qualityOptions.map(q => ({
-                    html: q.html,
-                    value: q.level,
-                    default: q.level === -1
-                  })),
-                  onSelect: function (item: any) {
-                    const targetHeight = Number(item.value);
-                    if (targetHeight === -1) {
-                      shakaPlayer.configure({ abr: { enabled: true } });
-                    } else {
-                      shakaPlayer.configure({ abr: { enabled: false } });
-                      const track = shakaPlayer.getVariantTracks().find((t: any) => t.height === targetHeight);
-                      if (track) shakaPlayer.selectVariantTrack(track, true);
-                    }
-                    return item.html;
-                  },
-                });
+                const qualitySetting = artInstance.setting.find('quality');
+                if (!qualitySetting) {
+                  artInstance.setting.add({
+                    name: 'quality',
+                    width: 200,
+                    html: 'Quality',
+                    tooltip: 'Auto',
+                    selector: qualityOptions.map(q => ({
+                      html: q.html,
+                      value: q.level,
+                      default: q.level === -1
+                    })),
+                    onSelect: function (item: any) {
+                      const targetHeight = Number(item.value);
+                      if (targetHeight === -1) {
+                        shakaPlayer.configure({ abr: { enabled: true } });
+                      } else {
+                        shakaPlayer.configure({ abr: { enabled: false } });
+                        const track = shakaPlayer.getVariantTracks().find((t: any) => t.height === targetHeight);
+                        if (track) shakaPlayer.selectVariantTrack(track, true);
+                      }
+                      return item.html;
+                    },
+                  });
+                }
+              }
+            } catch (e: any) {
+              // 🎯 Direct Fail করলে Auto-Fallback টু Proxy
+              if (!isProxy && fallbackProxyUrl && !isProxyFallback) {
+                isProxyFallback = true;
+                console.warn("Direct blocked → Handing off to Proxy");
+                artInstance.notice.show = "🔄 Direct Failed! Switching to Proxy...";
+                loadDash(fallbackProxyUrl, true);
+              } else {
+                console.error("Shaka Load Error:", e);
               }
             }
-          } catch (e: any) {
-            console.error("Shaka Load Error:", e);
-          }
+          };
+
+          // 🚀 Start Process: Initially try Direct URL
+          loadDash(url, false);
         }
       },
     });
