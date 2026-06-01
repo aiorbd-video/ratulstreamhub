@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-// @ts-ignore
+
 // @ts-ignore
 import shaka from 'shaka-player';
 
