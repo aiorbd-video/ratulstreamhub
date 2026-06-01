@@ -6,7 +6,9 @@ import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
 // @ts-ignore
-import shaka from 'shaka-player/dist/shaka-player.compiled';
+// @ts-ignore
+import shaka from 'shaka-player';
+
 import Link from 'next/link';
 
 export default function WatchPage() {
