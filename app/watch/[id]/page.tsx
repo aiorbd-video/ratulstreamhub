@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
@@ -12,26 +12,53 @@ export default function WatchPage() {
   const params = useParams();
   const shortId = params.id as string;
   const playerRef = useRef<HTMLDivElement>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
   
   const [streamData, setStreamData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   
+  // 🎯 লগস স্টোর করার স্টেট
+  const [logs, setLogs] = useState<{ time: string; msg: string; type: 'ok' | 'err' | 'warn' | 'info' }[]>([]);
+
   const TELEGRAM_BOT_USERNAME = "ratulnotific_bot"; 
 
+  // 🎯 লগ প্রিন্ট করার ফাংশন
+  const addLog = useCallback((msg: string, type: 'ok' | 'err' | 'warn' | 'info' = 'info') => {
+    const time = new Date().toLocaleTimeString();
+    setLogs(prev => {
+      const newLogs = [...prev, { time, msg, type }];
+      if (newLogs.length > 100) newLogs.shift(); // সর্বোচ্চ ১০০ লাইন লগ রাখবে
+      return newLogs;
+    });
+    console.log(`[${type.toUpperCase()}] ${msg}`);
+  }, []);
+
+  // লগের স্ক্রল অটো নিচে নেওয়ার জন্য
   useEffect(() => {
+    if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  useEffect(() => {
+    addLog('Fetching stream data from database...', 'info');
     fetch(`/api/watch/${shortId}`)
       .then(res => res.json())
       .then(data => {
-        if (data.success) setStreamData(data);
-        else setErrorMsg('এই স্ট্রিমটি আর সচল নেই বা মুছে ফেলা হয়েছে!');
+        if (data.success) {
+          setStreamData(data);
+          addLog('Stream data fetched successfully!', 'ok');
+        } else {
+          setErrorMsg('এই স্ট্রিমটি আর সচল নেই বা মুছে ফেলা হয়েছে!');
+          addLog('Failed: Stream data not found or expired', 'err');
+        }
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
         setErrorMsg('সার্ভার থেকে ডাটা আনতে সমস্যা হয়েছে!');
+        addLog(`Server Error: ${err.message}`, 'err');
         setLoading(false);
       });
-  }, [shortId]);
+  }, [shortId, addLog]);
 
   useEffect(() => {
     if (!streamData || !playerRef.current) return;
@@ -42,8 +69,7 @@ export default function WatchPage() {
 
     const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
     
-    // 🎯 Smart Proxy URL Builder (CF Worker-এর জন্য)
-    // এটি আপনার HTML কোডের মতোই ?url=... &ref=... জেনারেট করবে
+    // 🎯 Proxy URL Builder
     const fallbackProxyUrl = streamData.proxy_url 
       ? (streamData.proxy_url.includes('?') 
           ? `${streamData.proxy_url}${encodeURIComponent(streamData.streamUrl)}${referer ? `&ref=${encodeURIComponent(referer)}` : ''}`
@@ -51,23 +77,22 @@ export default function WatchPage() {
       : '';
 
     const isDash = streamData.stream_type === 'dash';
+    addLog(`Booting ArtPlayer for ${isDash ? 'DASH (MPD)' : 'HLS (M3U8)'}...`, 'warn');
 
     art = new Artplayer({
       container: playerRef.current,
-      url: streamData.streamUrl, // প্রথমে Direct ট্রাই করবে
+      url: streamData.streamUrl, 
       type: isDash ? 'mpd' : 'm3u8',
       poster: streamData.logo,
       volume: 0.8,
       isLive: true,
       muted: true, 
       autoplay: true,
-      
       playsInline: true,
       autoOrientation: true, 
       fastForward: true, 
       lock: true, 
       airplay: true, 
-      
       pip: true,
       autoMini: true,
       setting: true,
@@ -80,7 +105,7 @@ export default function WatchPage() {
       
       customType: {
         // ==========================================
-        // 🟢 HLS (m3u8) Smart Fallback Logic
+        // 🟢 HLS (m3u8) Smart Fallback
         // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
@@ -89,9 +114,12 @@ export default function WatchPage() {
             const loadHls = (targetUrl: string, isProxy: boolean) => {
               if (hls) hls.destroy();
               
+              addLog(`Initializing HLS.js (${isProxy ? 'Proxy' : 'Direct'})...`, 'info');
+              addLog(`Target URL: ${targetUrl}`, 'warn');
+
               hls = new Hls({
                 lowLatencyMode: true,
-                maxBufferLength: 30,
+                maxBufferLength: 20,
                 fragLoadingTimeOut: 15000,
                 manifestLoadingTimeOut: 12000,
                 xhrSetup: function (xhr: any) {
@@ -103,8 +131,10 @@ export default function WatchPage() {
               hls.loadSource(targetUrl);
               hls.attachMedia(video);
               
-              hls.on(Hls.Events.MANIFEST_PARSED, function () {
+              hls.on(Hls.Events.MANIFEST_PARSED, function (_, data) {
+                addLog(`✅ Manifest OK — ${data.levels.length} quality levels via ${isProxy ? 'Proxy' : 'Direct'}`, 'ok');
                 artInstance.notice.show = isProxy ? "🟢 Playing via Proxy" : "🟢 Playing Direct";
+                
                 if (hls.levels.length > 1) {
                   const qualityOptions = hls.levels.map((level, index) => ({
                     html: (level.height ? level.height + 'p' : 'Quality ' + (index + 1)),
@@ -126,6 +156,7 @@ export default function WatchPage() {
                       })),
                       onSelect: function (item: any) {
                         hls.currentLevel = Number(item.value);
+                        addLog(`Quality switched to: ${item.html}`, 'info');
                         return item.html;
                       },
                     });
@@ -133,25 +164,29 @@ export default function WatchPage() {
                 }
               });
 
-              hls.on(Hls.Events.ERROR, function (event, data) {
+              hls.on(Hls.Events.ERROR, function (_, data) {
                 if (data.fatal) {
+                  addLog(`HLS Fatal Error: ${data.type} | ${data.details}`, 'err');
+                  
                   switch (data.type) {
                     case Hls.ErrorTypes.NETWORK_ERROR:
-                      // 🎯 Direct Fail করলে Auto-Fallback টু Proxy
                       if (!isProxy && fallbackProxyUrl && !isProxyFallback) {
                         isProxyFallback = true;
-                        console.warn("Direct blocked (CORS/403) → Handing off to Proxy");
-                        artInstance.notice.show = "🔄 Direct Failed! Switching to Proxy...";
+                        addLog("Direct URL blocked (CORS/403) → Switching to Proxy...", 'warn');
+                        artInstance.notice.show = "🔄 Direct Blocked! Switching to Proxy...";
                         loadHls(fallbackProxyUrl, true);
                       } else {
+                        addLog("Network Error! Attempting to recover...", 'warn');
                         hls.startLoad();
                       }
                       break;
                     case Hls.ErrorTypes.MEDIA_ERROR:
+                      addLog("Media Error! Attempting to recover...", 'warn');
                       hls.recoverMediaError();
                       break;
                     default:
-                      artInstance.notice.show = `⚠️ Stream Error: ${data.details}`;
+                      addLog(`Stream destroyed due to fatal error.`, 'err');
+                      artInstance.notice.show = `⚠️ Stream Error`;
                       hls.destroy();
                       setTimeout(() => setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।'), 3000);
                       break;
@@ -160,21 +195,21 @@ export default function WatchPage() {
               });
             };
 
-            // 🚀 Start Process: Initially try Direct URL
             loadHls(url, false);
-
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            addLog("HLS not supported natively, trying browser default...", 'warn');
             video.src = url;
           }
         },
 
         // ==========================================
-        // 🔵 DASH (mpd) Smart Fallback Logic
+        // 🔵 DASH (mpd) Smart Fallback
         // ==========================================
         mpd: async function (video, url, artInstance) {
           shaka.polyfill.installAll();
 
           if (!shaka.Player.isBrowserSupported()) {
+            addLog("Browser not supported for Shaka Player (DASH)", 'err');
             artInstance.notice.show = "⚠️ Browser not supported for DASH!";
             return;
           }
@@ -199,14 +234,18 @@ export default function WatchPage() {
           };
 
           if (streamData.drm_key_id && streamData.drm_key) {
+            addLog(`Applying Clearkey DRM... (KeyID: ${streamData.drm_key_id})`, 'info');
             shakaConfig.drm = {
               clearKeys: { [streamData.drm_key_id]: streamData.drm_key }
             };
+          } else {
+            addLog("No DRM keys provided.", 'info');
           }
 
           shakaPlayer.configure(shakaConfig);
 
           shakaPlayer.addEventListener('error', (event: any) => {
+            addLog(`Shaka Error Detail: ${event.detail.code} | ${event.detail.message || 'Network Fail'}`, 'err');
             if (event.detail.severity === shaka.util.Error.Severity.CRITICAL) {
               if (isProxyFallback || !fallbackProxyUrl) {
                 artInstance.notice.show = `⚠️ DRM/Stream Error`;
@@ -217,7 +256,12 @@ export default function WatchPage() {
 
           const loadDash = async (targetUrl: string, isProxy: boolean) => {
             try {
+              addLog(`Loading Shaka Player (${isProxy ? 'Proxy' : 'Direct'})...`, 'warn');
+              addLog(`Target URL: ${targetUrl}`, 'info');
+              
               await shakaPlayer.load(targetUrl);
+              
+              addLog(`✅ DASH Manifest Loaded successfully via ${isProxy ? 'Proxy' : 'Direct'}`, 'ok');
               artInstance.notice.show = isProxy ? "🟢 Playing via Proxy" : "🟢 Playing Direct";
               
               const tracks = shakaPlayer.getVariantTracks();
@@ -245,10 +289,12 @@ export default function WatchPage() {
                       const targetHeight = Number(item.value);
                       if (targetHeight === -1) {
                         shakaPlayer.configure({ abr: { enabled: true } });
+                        addLog('Quality switched to: Auto (ABR ON)', 'info');
                       } else {
                         shakaPlayer.configure({ abr: { enabled: false } });
                         const track = shakaPlayer.getVariantTracks().find((t: any) => t.height === targetHeight);
                         if (track) shakaPlayer.selectVariantTrack(track, true);
+                        addLog(`Quality switched to: ${targetHeight}p (ABR OFF)`, 'warn');
                       }
                       return item.html;
                     },
@@ -256,46 +302,49 @@ export default function WatchPage() {
                 }
               }
             } catch (e: any) {
-              // 🎯 Direct Fail করলে Auto-Fallback টু Proxy
+              addLog(`Shaka Load Failed: ${e.message || e.code}`, 'err');
               if (!isProxy && fallbackProxyUrl && !isProxyFallback) {
                 isProxyFallback = true;
-                console.warn("Direct blocked → Handing off to Proxy");
+                addLog("Direct blocked (CORS/Network) → Switching to Proxy...", 'warn');
                 artInstance.notice.show = "🔄 Direct Failed! Switching to Proxy...";
                 loadDash(fallbackProxyUrl, true);
-              } else {
-                console.error("Shaka Load Error:", e);
               }
             }
           };
 
-          // 🚀 Start Process: Initially try Direct URL
           loadDash(url, false);
         }
       },
     });
 
+    art.on('play', () => addLog('Video Playback Started', 'ok'));
+    art.on('pause', () => addLog('Video Paused', 'warn'));
+    art.on('waiting', () => addLog('Buffering/Waiting for data...', 'info'));
+
     return () => {
+      addLog('Destroying player instances...', 'warn');
       if (hls) hls.destroy();
       if (shakaPlayer) shakaPlayer.destroy();
       if (art && art.destroy) art.destroy(false);
     };
-  }, [streamData]);
+  }, [streamData, addLog]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-2 md:p-6">
-      <div className="w-full max-w-[1400px] bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl">
-        
-        <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm z-10 relative">
-          <h1 className="text-sm md:text-lg font-bold flex items-center gap-2 line-clamp-1 max-w-[70%]">
-            <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse flex-shrink-0"></span>
-            {streamData ? streamData.title : 'Live Stream'}
-          </h1>
-          <Link href="/" className="text-xs md:text-sm bg-slate-800 hover:bg-red-600 px-3 py-1.5 rounded-xl transition-all font-medium border border-slate-700/50">
-            ← ফিরে যান
-          </Link>
+    <div className="min-h-screen bg-[#070710] text-white flex flex-col items-center justify-start p-2 md:p-6 font-sans">
+      
+      {/* 📺 Top Bar */}
+      <div className="w-full max-w-[1000px] flex items-center gap-3 mb-4 pb-3 border-b border-[#1c1c2e]">
+        <div className="bg-[#c0392b] rounded-lg w-8 h-8 flex items-center justify-center text-lg flex-shrink-0 shadow-lg shadow-red-500/20">📺</div>
+        <h1 className="text-base md:text-lg font-bold tracking-wide">HLS/DASH Smart Player</h1>
+        <div className="ml-auto text-[10px] md:text-xs bg-[#1c1c2e] text-[#4a4a6a] px-3 py-1 rounded-full border border-[#2a2a3e]">
+          Enterprise Engine
         </div>
+      </div>
 
-        <div className="relative w-full aspect-video md:h-[75vh] md:aspect-auto bg-black flex items-center justify-center overflow-hidden">
+      <div className="w-full max-w-[1000px] bg-[#13131f] border border-[#1c1c2e] rounded-xl overflow-hidden shadow-2xl flex flex-col">
+        
+        {/* 🎬 Video Frame */}
+        <div className="relative w-full aspect-video bg-black flex items-center justify-center">
           
           {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-20">
@@ -314,7 +363,7 @@ export default function WatchPage() {
                 href={`https://t.me/${TELEGRAM_BOT_USERNAME}?start=${shortId}`} 
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-[#0088cc] hover:bg-[#0077b3] text-white text-sm font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2 animate-bounce"
+                className="bg-[#0088cc] hover:bg-[#0077b3] text-white text-sm font-bold py-3 px-6 rounded-xl transition-all shadow-lg flex items-center gap-2 animate-bounce"
               >
                 <span>বট থেকে নতুন লিংক নিন</span>
                 <span>↗️</span>
@@ -324,6 +373,34 @@ export default function WatchPage() {
 
           {!errorMsg && <div ref={playerRef} className="w-full h-full"></div>}
         </div>
+
+        {/* 📟 Terminal Logs Section */}
+        <div className="bg-[#0a0a14] p-3 md:p-4 border-t border-[#1c1c2e] flex flex-col gap-2">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+            <span className="text-xs font-bold text-[#4a4a6a] uppercase tracking-wider">System Logs</span>
+          </div>
+          
+          <div className="bg-[#070710] border border-[#1c1c2e] rounded-lg p-3 h-48 md:h-64 overflow-y-auto font-mono text-[11px] leading-relaxed custom-scrollbar shadow-inner">
+            {logs.length === 0 && <span className="text-[#4a4a6a]">Waiting for engine initialization...</span>}
+            {logs.map((log, index) => (
+              <div 
+                key={index} 
+                className={`mb-1 break-words ${
+                  log.type === 'ok' ? 'text-[#00c853]' : 
+                  log.type === 'err' ? 'text-[#ff1744]' : 
+                  log.type === 'warn' ? 'text-[#ffd600]' : 
+                  'text-[#40c4ff]'
+                }`}
+              >
+                <span className="opacity-60 mr-2">[{log.time}]</span> 
+                {log.msg}
+              </div>
+            ))}
+            <div ref={logsEndRef} />
+          </div>
+        </div>
+
       </div>
     </div>
   );
