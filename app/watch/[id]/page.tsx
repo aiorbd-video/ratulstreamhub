@@ -1,404 +1,405 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import Artplayer from 'artplayer';
-import Hls from 'hls.js';
-// @ts-ignore
-import shaka from 'shaka-player';
 import Link from 'next/link';
 
+// ─────────────────────────────────────────────────────────────
+// ✅ NO top-level imports for Artplayer / Hls / Shaka
+//    They are dynamically imported inside useEffect (browser-only)
+//    This fixes: "player shows but stream doesn't play" in Next.js 14
+// ─────────────────────────────────────────────────────────────
+
+interface StreamHeaders {
+  referer?:   string;
+  origin?:    string;
+  cookie?:    string;
+  userAgent?: string;
+}
+
+interface StreamData {
+  title:       string;
+  streamUrl:   string;
+  stream_type: 'hls' | 'dash';
+  logo?:       string;
+  proxy_url?:  string;
+  headers?:    StreamHeaders;
+  drm_key_id?: string;
+  drm_key?:    string;
+}
+
+type PlayMethod = 'direct' | 'proxy' | null;
+
+function buildProxyUrl(base: string, url: string, ref?: string): string {
+  const b   = base.replace(/\/$/, '') + '/';
+  const sep = b.includes('?') ? '&' : '?';
+  let out   = `${b}${sep}url=${encodeURIComponent(url)}`;
+  if (ref) out += `&ref=${encodeURIComponent(ref)}`;
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+
 export default function WatchPage() {
-  const params = useParams();
+  const params  = useParams();
   const shortId = params.id as string;
+
   const playerRef = useRef<HTMLDivElement>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
-  
-  const [streamData, setStreamData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-  
-  const [logs, setLogs] = useState<{ time: string; msg: string; type: 'ok' | 'err' | 'warn' | 'info' }[]>([]);
-  const TELEGRAM_BOT_USERNAME = "ratulnotific_bot"; 
 
-  const addLog = useCallback((msg: string, type: 'ok' | 'err' | 'warn' | 'info' = 'info') => {
-    const time = new Date().toLocaleTimeString();
-    setLogs(prev => {
-      const newLogs = [...prev, { time, msg, type }];
-      if (newLogs.length > 150) newLogs.shift(); 
-      return newLogs;
-    });
-    console.log(`[${type.toUpperCase()}] ${msg}`);
-  }, []);
+  const [stream,     setStream]     = useState<StreamData | null>(null);
+  const [loading,    setLoading]    = useState(true);
+  const [errorMsg,   setErrorMsg]   = useState('');
+  const [playMethod, setPlayMethod] = useState<PlayMethod>(null);
 
+  const TG_BOT = 'ratulnotific_bot';
+
+  // ── Fetch stream metadata ──────────────────────────────────
   useEffect(() => {
-    if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
-
-  useEffect(() => {
-    addLog('Fetching stream data from database API...', 'info');
     fetch(`/api/watch/${shortId}`)
-      .then(res => res.json())
+      .then(r => r.json())
       .then(data => {
-        if (data.success) {
-          setStreamData(data);
-          addLog('Stream data fetched successfully!', 'ok');
-          
-          // 🎯 Proxy Debugger added
-          if (data.proxy_url) {
-            addLog(`✅ Proxy URL received from DB: ${data.proxy_url}`, 'ok');
-          } else {
-            addLog(`⚠️ No Proxy URL found in DB for this stream!`, 'warn');
-          }
-
-        } else {
-          setErrorMsg('এই স্ট্রিমটি আর সচল নেই বা মুছে ফেলা হয়েছে!');
-          addLog('Failed: Stream data not found or expired', 'err');
-        }
+        if (data.success) setStream(data);
+        else setErrorMsg(data.message ?? 'স্ট্রিমটি আর সচল নেই বা মুছে ফেলা হয়েছে!');
         setLoading(false);
       })
-      .catch((err) => {
-        setErrorMsg('সার্ভার থেকে ডাটা আনতে সমস্যা হয়েছে!');
-        addLog(`Server API Error: ${err.message}`, 'err');
+      .catch(() => {
+        setErrorMsg('সার্ভার থেকে ডাটা আনতে সমস্যা হয়েছে!');
         setLoading(false);
       });
-  }, [shortId, addLog]);
+  }, [shortId]);
 
+  // ── Init player (browser-only, dynamic imports) ────────────
   useEffect(() => {
-    if (!streamData || !playerRef.current) return;
+    if (!stream || !playerRef.current) return;
 
-    let art: Artplayer;
-    let hls: Hls;
-    let shakaPlayer: any;
+    // Refs for cleanup
+    let art:  any = null;
+    let hls:  any = null;
+    let shak: any = null;
+    let dead      = false; // guard against stale closures after unmount
 
-    const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
-    
-    const fallbackProxyUrl = streamData.proxy_url 
-      ? (streamData.proxy_url.includes('?') 
-          ? `${streamData.proxy_url}${encodeURIComponent(streamData.streamUrl)}${referer ? `&ref=${encodeURIComponent(referer)}` : ''}`
-          : `${streamData.proxy_url}?url=${encodeURIComponent(streamData.streamUrl)}${referer ? `&ref=${encodeURIComponent(referer)}` : ''}`)
+    const { referer = '' } = stream.headers ?? {};
+    const proxyUrl = stream.proxy_url
+      ? buildProxyUrl(stream.proxy_url, stream.streamUrl, referer || undefined)
       : '';
+    const isDash = stream.stream_type === 'dash';
 
-    addLog(`Prepared Fallback Proxy: ${fallbackProxyUrl ? 'Ready' : 'None'}`, fallbackProxyUrl ? 'info' : 'warn');
+    async function init() {
+      // ✅ Dynamic imports — only runs in browser, never on server
+      const [
+        { default: Artplayer },
+        { default: Hls },
+        shakaModule,
+      ] = await Promise.all([
+        import('artplayer'),
+        import('hls.js'),
+        import('shaka-player'),
+      ]);
 
-    const isDash = streamData.stream_type === 'dash';
-    addLog(`Booting Enterprise Player for ${isDash ? 'DASH' : 'HLS'}...`, 'warn');
+      if (dead || !playerRef.current) return;
 
-    art = new Artplayer({
-      container: playerRef.current,
-      url: streamData.streamUrl, 
-      type: isDash ? 'mpd' : 'm3u8',
-      poster: streamData.logo,
-      volume: 0.8,
-      isLive: true,
-      muted: true, 
-      autoplay: true,
-      playsInline: true,
-      autoOrientation: true, 
-      fastForward: true, 
-      lock: true, 
-      airplay: true, 
-      pip: true,
-      autoMini: true,
-      setting: true,
-      playbackRate: true, 
-      aspectRatio: true,  
-      fullscreen: true,
-      fullscreenWeb: true,
-      hotkey: true,
-      theme: '#ef4444',
-      
-      customType: {
-        m3u8: function (video, url, artInstance) {
-          if (Hls.isSupported()) {
-            let isProxyFallback = false;
+      const shaka = shakaModule.default ?? shakaModule;
 
-            const loadHls = (targetUrl: string, isProxy: boolean) => {
-              if (hls) hls.destroy();
-              
-              addLog(`Initializing HLS.js (${isProxy ? 'Proxy' : 'Direct'})...`, 'info');
-              addLog(`URL: ${targetUrl}`, 'info');
-
-              hls = new Hls({
-                lowLatencyMode: true,
-                maxBufferLength: 30,
-                fragLoadingTimeOut: 15000,
-                manifestLoadingTimeOut: 12000,
-                xhrSetup: function (xhr: any) {
-                  if (userAgent) xhr.setRequestHeader('X-User-Agent', userAgent);
-                  if (cookie) xhr.setRequestHeader('X-Cookie', cookie);
-                }
-              });
-              
-              hls.loadSource(targetUrl);
-              hls.attachMedia(video);
-              
-              hls.on(Hls.Events.MANIFEST_PARSED, function (_, data) {
-                addLog(`✅ Manifest parsed — ${data.levels.length} quality levels`, 'ok');
-                artInstance.notice.show = isProxy ? "🟢 Playing via Proxy" : "🟢 Playing Direct";
-                
-                if (hls.levels.length > 1) {
-                  const qualityOptions = hls.levels.map((level, index) => ({
-                    html: (level.height ? level.height + 'p' : 'Quality ' + (index + 1)),
-                    level: index,
-                  }));
-                  qualityOptions.unshift({ html: 'Auto', level: -1 });
-
-                  const qualitySetting = artInstance.setting.find('quality');
-                  if (!qualitySetting) {
-                    artInstance.setting.add({
-                      name: 'quality',
-                      width: 200,
-                      html: 'Quality',
-                      tooltip: 'Auto',
-                      selector: qualityOptions.map(q => ({
-                        html: q.html,
-                        value: q.level,
-                        default: q.level === -1
-                      })),
-                      onSelect: function (item: any) {
-                        hls.currentLevel = Number(item.value);
-                        addLog(`Quality switched: ${item.html}`, 'info');
-                        return item.html;
-                      },
-                    });
-                  }
-                }
-              });
-
-              hls.on(Hls.Events.ERROR, function (_, data) {
-                if (data.fatal) {
-                  addLog(`HLS Error: ${data.type} | ${data.details}`, 'err');
-                  
-                  switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                      if (!isProxy && fallbackProxyUrl && !isProxyFallback) {
-                        isProxyFallback = true;
-                        addLog("Direct URL blocked → Switching to Proxy...", 'warn');
-                        artInstance.notice.show = "🔄 Blocked! Switching Proxy...";
-                        loadHls(fallbackProxyUrl, true);
-                      } else {
-                        addLog("Network Error! Trying to recover...", 'warn');
-                        hls.startLoad();
-                      }
-                      break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                      addLog("Media Error! Trying to recover...", 'warn');
-                      hls.recoverMediaError();
-                      break;
-                    default:
-                      addLog(`Fatal Error. Destroying stream.`, 'err');
-                      hls.destroy();
-                      setTimeout(() => setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।'), 3000);
-                      break;
-                  }
-                }
-              });
-            };
-
-            loadHls(url, false);
-          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            addLog("HLS not supported natively, fallback to browser default.", 'warn');
-            video.src = url;
+      // ────────────────────────────────────────────────
+      // HLS custom type handler
+      // ────────────────────────────────────────────────
+      function handleHls(video: HTMLVideoElement, artInst: any) {
+        if (!Hls.isSupported()) {
+          // Safari native HLS fallback
+          if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = stream!.streamUrl;
           }
-        },
-
-        mpd: async function (video, url, artInstance) {
-          shaka.polyfill.installAll();
-
-          if (!shaka.Player.isBrowserSupported()) {
-            addLog("Browser not supported for Shaka Player (DASH)", 'err');
-            artInstance.notice.show = "⚠️ Browser not supported for DASH!";
-            return;
-          }
-
-          let isProxyFallback = false;
-          shakaPlayer = new shaka.Player(video);
-
-          shakaPlayer.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
-            if (userAgent) request.headers['X-User-Agent'] = userAgent;
-            if (cookie) request.headers['X-Cookie'] = cookie;
-          });
-
-          const shakaConfig: any = {
-            abr: { enabled: true, defaultBandwidthEstimate: 1000000 },
-            streaming: {
-              bufferingGoal: 10,
-              rebufferingGoal: 2,
-              bufferBehind: 30,
-              retryParameters: { maxAttempts: 3, baseDelay: 1000 }
-            },
-            manifest: { retryParameters: { maxAttempts: 3 } }
-          };
-
-          if (streamData.drm_key_id && streamData.drm_key) {
-            addLog(`Applying Clearkey DRM...`, 'info');
-            shakaConfig.drm = {
-              clearKeys: { [streamData.drm_key_id]: streamData.drm_key }
-            };
-          }
-
-          shakaPlayer.configure(shakaConfig);
-
-          shakaPlayer.addEventListener('error', (event: any) => {
-            addLog(`Shaka Error: ${event.detail.code}`, 'err');
-            if (event.detail.severity === shaka.util.Error.Severity.CRITICAL) {
-              if (isProxyFallback || !fallbackProxyUrl) {
-                setTimeout(() => setErrorMsg('DRM অথবা স্ট্রিম লিংকটি কাজ করছে না!'), 3000);
-              }
-            }
-          });
-
-          const loadDash = async (targetUrl: string, isProxy: boolean) => {
-            try {
-              addLog(`Loading Shaka Player (${isProxy ? 'Proxy' : 'Direct'})...`, 'warn');
-              addLog(`URL: ${targetUrl}`, 'info');
-              
-              await shakaPlayer.load(targetUrl);
-              addLog(`✅ DASH Manifest Loaded`, 'ok');
-              artInstance.notice.show = isProxy ? "🟢 Playing via Proxy" : "🟢 Playing Direct";
-              
-              const tracks = shakaPlayer.getVariantTracks();
-              if (tracks.length > 0) {
-                const resolutions = Array.from(new Set(tracks.map((t: any) => t.height))).sort((a: any, b: any) => b - a);
-                const qualityOptions = resolutions.map(h => ({
-                  html: h ? `${h}p` : 'Unknown',
-                  level: h
-                }));
-                qualityOptions.unshift({ html: 'Auto', level: -1 });
-
-                const qualitySetting = artInstance.setting.find('quality');
-                if (!qualitySetting) {
-                  artInstance.setting.add({
-                    name: 'quality',
-                    width: 200,
-                    html: 'Quality',
-                    tooltip: 'Auto',
-                    selector: qualityOptions.map(q => ({
-                      html: q.html,
-                      value: q.level,
-                      default: q.level === -1
-                    })),
-                    onSelect: function (item: any) {
-                      const targetHeight = Number(item.value);
-                      if (targetHeight === -1) {
-                        shakaPlayer.configure({ abr: { enabled: true } });
-                        addLog('Quality: Auto (ABR ON)', 'info');
-                      } else {
-                        shakaPlayer.configure({ abr: { enabled: false } });
-                        const track = shakaPlayer.getVariantTracks().find((t: any) => t.height === targetHeight);
-                        if (track) shakaPlayer.selectVariantTrack(track, true);
-                        addLog(`Quality: ${targetHeight}p (ABR OFF)`, 'warn');
-                      }
-                      return item.html;
-                    },
-                  });
-                }
-              }
-            } catch (e: any) {
-              addLog(`Shaka Load Failed: ${e.message || e.code}`, 'err');
-              if (!isProxy && fallbackProxyUrl && !isProxyFallback) {
-                isProxyFallback = true;
-                addLog("Direct blocked → Switching to Proxy...", 'warn');
-                artInstance.notice.show = "🔄 Direct Failed! Switching Proxy...";
-                loadDash(fallbackProxyUrl, true);
-              }
-            }
-          };
-
-          loadDash(url, false);
+          return;
         }
-      },
-    });
 
-    art.on('play', () => addLog('Video Playback Started', 'ok'));
-    art.on('pause', () => addLog('Video Paused', 'warn'));
-    art.on('waiting', () => addLog('Buffering data...', 'info'));
+        let proxied = false;
 
+        function loadHls(url: string, isProxy: boolean) {
+          if (hls) hls.destroy();
+
+          hls = new Hls({
+            lowLatencyMode:         true,
+            maxBufferLength:        30,
+            fragLoadingTimeOut:     15_000,
+            manifestLoadingTimeOut: 12_000,
+          });
+
+          hls.loadSource(url);
+          hls.attachMedia(video);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, (_: any, data: any) => {
+            if (dead) return;
+            setPlayMethod(isProxy ? 'proxy' : 'direct');
+            artInst.notice.show = isProxy ? '🔁 Proxy-তে চলছে' : '✅ Direct-এ চলছে';
+
+            // Quality levels
+            if (hls.levels.length > 1 && !artInst.setting.find('quality')) {
+              artInst.setting.add({
+                name:     'quality',
+                width:    180,
+                html:     '🎬 গুণমান',
+                tooltip:  'Auto',
+                selector: [
+                  { html: 'Auto', value: -1, default: true },
+                  ...hls.levels.map((l: any, i: number) => ({
+                    html:    l.height ? `${l.height}p` : `Level ${i + 1}`,
+                    value:   i,
+                    default: false,
+                  })),
+                ],
+                onSelect(item: any) {
+                  hls.currentLevel = Number(item.value);
+                  return item.html;
+                },
+              });
+            }
+          });
+
+          hls.on(Hls.Events.ERROR, (_: any, data: any) => {
+            if (!data.fatal) return;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              if (!isProxy && proxyUrl && !proxied) {
+                proxied = true;
+                artInst.notice.show = '⚡ Proxy-তে সুইচ হচ্ছে…';
+                loadHls(proxyUrl, true);
+              } else {
+                hls.startLoad();
+              }
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else {
+              if (!dead) setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।');
+            }
+          });
+        }
+
+        loadHls(stream!.streamUrl, false);
+      }
+
+      // ────────────────────────────────────────────────
+      // DASH custom type handler
+      // ────────────────────────────────────────────────
+      async function handleDash(video: HTMLVideoElement, artInst: any) {
+        shaka.polyfill.installAll();
+        if (!shaka.Player.isBrowserSupported()) {
+          if (!dead) setErrorMsg('এই ব্রাউজারে DASH সাপোর্ট নেই!');
+          return;
+        }
+
+        let proxied = false;
+        shak = new shaka.Player(video);
+
+        const cfg: any = {
+          abr: { enabled: true, defaultBandwidthEstimate: 1_000_000 },
+          streaming: {
+            bufferingGoal:   10,
+            rebufferingGoal: 2,
+            bufferBehind:    30,
+            retryParameters: { maxAttempts: 3, baseDelay: 1000 },
+          },
+          manifest: { retryParameters: { maxAttempts: 3 } },
+        };
+
+        if (stream!.drm_key_id && stream!.drm_key)
+          cfg.drm = { clearKeys: { [stream!.drm_key_id]: stream!.drm_key } };
+
+        shak.configure(cfg);
+
+        shak.addEventListener('error', (e: any) => {
+          if (
+            e.detail.severity === shaka.util.Error.Severity.CRITICAL &&
+            (proxied || !proxyUrl) &&
+            !dead
+          ) setErrorMsg('DRM বা স্ট্রিম লিংকটি কাজ করছে না!');
+        });
+
+        async function loadDash(url: string, isProxy: boolean) {
+          try {
+            await shak.load(url);
+            if (dead) return;
+            setPlayMethod(isProxy ? 'proxy' : 'direct');
+            artInst.notice.show = isProxy ? '🔁 Proxy-তে চলছে' : '✅ Direct-এ চলছে';
+
+            const tracks = shak.getVariantTracks() as any[];
+            if (tracks.length > 0 && !artInst.setting.find('quality')) {
+              const heights: number[] = Array.from(
+                new Set(tracks.map((t: any) => t.height))
+              ).sort((a, b) => b - a);
+
+              artInst.setting.add({
+                name:     'quality',
+                width:    180,
+                html:     '🎬 গুণমান',
+                tooltip:  'Auto',
+                selector: [
+                  { html: 'Auto', value: -1, default: true },
+                  ...heights.map((h) => ({ html: h ? `${h}p` : '?', value: h, default: false })),
+                ],
+                onSelect(item: any) {
+                  const h = Number(item.value);
+                  if (h === -1) {
+                    shak.configure({ abr: { enabled: true } });
+                  } else {
+                    shak.configure({ abr: { enabled: false } });
+                    const t = shak.getVariantTracks().find((t: any) => t.height === h);
+                    if (t) shak.selectVariantTrack(t, true);
+                  }
+                  return item.html;
+                },
+              });
+            }
+          } catch {
+            if (!isProxy && proxyUrl && !proxied) {
+              proxied = true;
+              artInst.notice.show = '⚡ Proxy-তে সুইচ হচ্ছে…';
+              loadDash(proxyUrl, true);
+            } else if (!dead) {
+              setErrorMsg('স্ট্রিমটি লোড হয়নি।');
+            }
+          }
+        }
+
+        loadDash(stream!.streamUrl, false);
+      }
+
+      // ────────────────────────────────────────────────
+      // Create ArtPlayer instance
+      // ────────────────────────────────────────────────
+      art = new Artplayer({
+        container: playerRef.current!,
+        url:       stream!.streamUrl,
+        type:      isDash ? 'mpd' : 'm3u8',
+        poster:    stream!.logo ?? '',
+        volume:    0.8,
+        isLive:    true,
+        muted:     true,
+        autoplay:  true,
+
+        playsInline:     true,
+        autoOrientation: true,
+        fastForward:     true,
+        lock:            true,
+        airplay:         true,
+
+        pip:           true,
+        autoMini:      true,
+        setting:       true,
+        playbackRate:  true,
+        aspectRatio:   true,
+        fullscreen:    true,
+        fullscreenWeb: true,
+        hotkey:        true,
+        theme:         '#ef4444',
+
+        customType: {
+          m3u8: (video: HTMLVideoElement, _url: string, inst: any) => {
+            handleHls(video, inst);
+          },
+          mpd: async (video: HTMLVideoElement, _url: string, inst: any) => {
+            await handleDash(video, inst);
+          },
+        },
+      });
+    }
+
+    init().catch(console.error);
+
+    // ── Cleanup ──────────────────────────────────────────────
     return () => {
-      addLog('Destroying player instances...', 'warn');
-      if (hls) hls.destroy();
-      if (shakaPlayer) shakaPlayer.destroy();
-      if (art && art.destroy) art.destroy(false);
+      dead = true;
+      hls?.destroy();
+      shak?.destroy();
+      art?.destroy?.(false);
     };
-  }, [streamData, addLog]);
+  }, [stream]);
 
+  // ── Render ─────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#070710] text-white flex flex-col items-center justify-start p-0 md:p-6 font-sans">
-      
-      <div className="w-full max-w-[1400px] flex flex-col h-screen md:h-auto md:bg-[#13131f] md:border border-[#1c1c2e] md:rounded-xl overflow-hidden shadow-2xl">
-        
-        {/* 📺 Top Bar */}
-        <div className="p-3 md:p-4 border-b border-[#1c1c2e] flex justify-between items-center bg-[#0e0e1a] z-10 relative flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="bg-[#c0392b] rounded-md w-6 h-6 md:w-8 md:h-8 flex items-center justify-center text-xs md:text-base flex-shrink-0 shadow-lg shadow-red-500/20">📺</div>
-            <h1 className="text-sm md:text-lg font-bold flex items-center gap-2 line-clamp-1">
-              {streamData ? streamData.title : 'Live Stream'}
-            </h1>
+    <div className="min-h-screen bg-[#06060f] text-white flex flex-col items-center justify-center p-2 md:p-5">
+      <div
+        className="w-full max-w-[1400px] rounded-2xl overflow-hidden shadow-2xl border border-white/5"
+        style={{ background: 'linear-gradient(180deg, #0f0f1a 0%, #080810 100%)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
+          {stream?.logo && (
+            <img
+              src={stream.logo}
+              alt={stream.title}
+              className="w-9 h-9 rounded-xl object-contain bg-white/5 p-1 flex-shrink-0"
+            />
+          )}
+
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="font-bold text-sm md:text-base truncate flex items-center gap-2">
+              <span className="relative flex h-2 w-2 flex-shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+              </span>
+              {stream?.title ?? 'Live Stream'}
+            </span>
+
+            {playMethod && (
+              <span
+                className={`text-[10px] font-semibold mt-0.5 w-fit px-2 py-px rounded-full border ${
+                  playMethod === 'direct'
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+                    : 'bg-sky-500/15 text-sky-400 border-sky-500/20'
+                }`}
+              >
+                {playMethod === 'direct' ? '⚡ Direct' : '🔁 Proxy'}
+              </span>
+            )}
           </div>
-          <Link href="/" className="text-xs md:text-sm bg-[#1c1c2e] hover:bg-[#c0392b] text-[#dde1f0] px-3 py-1.5 rounded-lg transition-all font-medium border border-[#2a2a3e]">
+
+          <Link
+            href="/"
+            className="flex-shrink-0 text-xs font-semibold bg-white/5 hover:bg-red-600
+                       border border-white/10 hover:border-red-600
+                       px-3 py-1.5 rounded-xl transition-all duration-200"
+          >
             ← ফিরে যান
           </Link>
         </div>
 
-        {/* 🎬 Video Frame */}
-        <div className="relative w-full flex-grow md:flex-grow-0 md:aspect-video bg-black flex items-center justify-center">
-          
+        {/* Player area */}
+        <div className="relative w-full aspect-video md:h-[76vh] md:aspect-auto bg-black">
+          {/* Loading */}
           {loading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-20">
-              <div className="w-10 h-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-              <p className="text-xs text-slate-400">খেলার লিংক লোড হচ্ছে...</p>
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black gap-3">
+              <div className="w-11 h-11 border-[3px] border-red-500/30 border-t-red-500 rounded-full animate-spin" />
+              <p className="text-xs text-white/30 tracking-wide">লোড হচ্ছে…</p>
             </div>
           )}
 
-          {errorMsg && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/95 z-30 p-6 text-center backdrop-blur-sm">
-              <div className="text-4xl mb-3">🤖</div>
-              <h2 className="text-xl font-bold text-red-500 mb-1">স্ট্রিমিং ব্যর্থ হয়েছে!</h2>
-              <p className="text-xs text-slate-400 mb-5 max-w-md">{errorMsg}</p>
-              
-              <a 
-                href={`https://t.me/${TELEGRAM_BOT_USERNAME}?start=${shortId}`} 
+          {/* Error */}
+          {errorMsg && !loading && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center
+                            bg-[#080810]/95 backdrop-blur-sm p-6 text-center">
+              <div className="text-5xl mb-4">📡</div>
+              <h2 className="text-base md:text-lg font-bold text-red-400 mb-1">স্ট্রিম ব্যর্থ হয়েছে</h2>
+              <p className="text-xs text-white/40 mb-6 max-w-xs leading-relaxed">{errorMsg}</p>
+
+              <a
+                href={`https://t.me/${TG_BOT}?start=${shortId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-[#0088cc] hover:bg-[#0077b3] text-white text-sm font-bold py-3 px-6 rounded-xl transition-all shadow-lg flex items-center gap-2 animate-bounce"
+                className="flex items-center gap-2 bg-[#229ED9] hover:bg-[#1a8fc4]
+                           text-white text-sm font-bold px-5 py-2.5 rounded-xl
+                           shadow-lg shadow-sky-500/20 transition-all duration-200
+                           hover:scale-[1.02] active:scale-95"
               >
-                <span>বট থেকে নতুন লিংক নিন</span>
-                <span>↗️</span>
+                <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                </svg>
+                বট থেকে নতুন লিংক নিন ↗
               </a>
             </div>
           )}
 
-          {!errorMsg && <div ref={playerRef} className="w-full h-full"></div>}
+          {/* Player mount */}
+          {!errorMsg && <div ref={playerRef} className="w-full h-full" />}
         </div>
-
-        {/* 📟 Terminal Logs Section */}
-        <div className="bg-[#0a0a14] p-3 md:p-4 border-t border-[#1c1c2e] flex flex-col gap-2 flex-shrink-0 h-[25vh] md:h-[200px]">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-xs font-bold text-[#4a4a6a] uppercase tracking-wider">System Diagnostic Logs</span>
-          </div>
-          
-          <div className="bg-[#070710] border border-[#1c1c2e] rounded-lg p-2 md:p-3 flex-grow overflow-y-auto font-mono text-[10px] md:text-[11px] leading-relaxed custom-scrollbar shadow-inner">
-            {logs.length === 0 && <span className="text-[#4a4a6a]">Waiting for engine initialization...</span>}
-            {logs.map((log, index) => (
-              <div 
-                key={index} 
-                className={`mb-1 break-words ${
-                  log.type === 'ok' ? 'text-[#00c853]' : 
-                  log.type === 'err' ? 'text-[#ff1744]' : 
-                  log.type === 'warn' ? 'text-[#ffd600]' : 
-                  'text-[#40c4ff]'
-                }`}
-              >
-                <span className="opacity-60 mr-2">[{log.time}]</span> 
-                {log.msg}
-              </div>
-            ))}
-            <div ref={logsEndRef} />
-          </div>
-        </div>
-
       </div>
     </div>
   );
