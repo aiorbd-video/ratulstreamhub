@@ -1,14 +1,12 @@
-// ফাইল পাথ: app/watch/[id]/page.tsx 
+// ফাইল পাথ: app/watch/[id]/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-
 // @ts-ignore
 import shaka from 'shaka-player';
-
 import Link from 'next/link';
 
 export default function WatchPage() {
@@ -20,7 +18,6 @@ export default function WatchPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   
-  // 🎯 আপনার টেলিগ্রাম বটের আসল ইউজারনেম
   const TELEGRAM_BOT_USERNAME = "ratulnotific_bot"; 
 
   useEffect(() => {
@@ -46,14 +43,12 @@ export default function WatchPage() {
 
     const { referer = '', origin = '', cookie = '', userAgent = '' } = streamData.headers || {};
     
-    // 🎯 Cloudflare Proxy Logic (প্রক্সি থাকলে প্রক্সি, না থাকলে ডাইরেক্ট)
     const finalStreamUrl = streamData.proxy_url 
         ? `${streamData.proxy_url}${streamData.streamUrl}` 
         : streamData.streamUrl;
 
     const isDash = streamData.stream_type === 'dash';
 
-    // 🌟 Enterprise Artplayer Configuration
     art = new Artplayer({
       container: playerRef.current,
       url: finalStreamUrl, 
@@ -61,15 +56,14 @@ export default function WatchPage() {
       poster: streamData.logo,
       volume: 0.8,
       isLive: true,
-      muted: true, // Auto-play পলিসির জন্য মিউট
+      muted: true, 
       autoplay: true,
       
-      // 📱 Mobile & TV Controls
       playsInline: true,
-      autoOrientation: true, // মোবাইল ল্যান্ডস্কেপ করলে অটো ফুলস্ক্রিন
-      fastForward: true, // লং প্রেসে 3x স্পিড
-      lock: true, // মোবাইল স্ক্রিন লক বাটন
-      airplay: true, // Apple Airplay সাপোর্ট
+      autoOrientation: true, 
+      fastForward: true, 
+      lock: true, 
+      airplay: true, 
       
       pip: true,
       autoMini: true,
@@ -82,9 +76,6 @@ export default function WatchPage() {
       theme: '#ef4444',
       
       customType: {
-        // ==========================================
-        // 🟢 HLS (m3u8) ইঞ্জিন - Powered by Hls.js
-        // ==========================================
         m3u8: function (video, url, artInstance) {
           if (Hls.isSupported()) {
             if (hls) hls.destroy();
@@ -111,7 +102,8 @@ export default function WatchPage() {
                 }));
                 qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-                const qualitySetting = artInstance.setting.settings.find(s => s.name === 'quality');
+                // 🎯 ফিক্স: TypeScript error fix করা হয়েছে
+                const qualitySetting = artInstance.setting.find('quality');
                 if (!qualitySetting) {
                   artInstance.setting.add({
                     name: 'quality',
@@ -154,9 +146,6 @@ export default function WatchPage() {
           }
         },
 
-        // ==========================================
-        // 🔵 DASH (mpd) & DRM ইঞ্জিন - Powered by Shaka
-        // ==========================================
         mpd: async function (video, url, artInstance) {
           shaka.polyfill.installAll();
 
@@ -167,13 +156,11 @@ export default function WatchPage() {
 
           shakaPlayer = new shaka.Player(video);
 
-          // হেডার প্রক্সি
           shakaPlayer.getNetworkingEngine().registerRequestFilter((type: any, request: any) => {
             if (userAgent) request.headers['X-User-Agent'] = userAgent;
             if (cookie) request.headers['X-Cookie'] = cookie;
           });
 
-          // 🎯 Anti-Buffering Configuration
           const shakaConfig: any = {
             abr: { enabled: true, defaultBandwidthEstimate: 1000000 },
             streaming: {
@@ -185,7 +172,6 @@ export default function WatchPage() {
             manifest: { retryParameters: { maxAttempts: 5 } }
           };
 
-          // 🔐 Clearkey DRM 
           if (streamData.drm_key_id && streamData.drm_key) {
             shakaConfig.drm = {
               clearKeys: {
@@ -207,7 +193,6 @@ export default function WatchPage() {
           try {
             await shakaPlayer.load(url);
             
-            // 🎯 Shaka Quality Control in Artplayer Menu
             const tracks = shakaPlayer.getVariantTracks();
             if (tracks.length > 0) {
               const resolutions = Array.from(new Set(tracks.map((t: any) => t.height))).sort((a: any, b: any) => b - a);
@@ -217,7 +202,8 @@ export default function WatchPage() {
               }));
               qualityOptions.unshift({ html: 'Auto', level: -1 });
 
-              const qualitySetting = artInstance.setting.settings.find(s => s.name === 'quality');
+              // 🎯 ফিক্স: TypeScript error fix করা হয়েছে
+              const qualitySetting = artInstance.setting.find('quality');
               if (!qualitySetting) {
                 artInstance.setting.add({
                   name: 'quality',
@@ -250,7 +236,6 @@ export default function WatchPage() {
       },
     });
 
-    // 🧹 Cleanup on Unmount
     return () => {
       if (hls) hls.destroy();
       if (shakaPlayer) shakaPlayer.destroy();
@@ -262,7 +247,6 @@ export default function WatchPage() {
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-2 md:p-6">
       <div className="w-full max-w-[1400px] bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl">
         
-        {/* Header Bar */}
         <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm z-10 relative">
           <h1 className="text-sm md:text-lg font-bold flex items-center gap-2 line-clamp-1 max-w-[70%]">
             <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse flex-shrink-0"></span>
@@ -273,7 +257,6 @@ export default function WatchPage() {
           </Link>
         </div>
 
-        {/* Player Container */}
         <div className="relative w-full aspect-video md:h-[75vh] md:aspect-auto bg-black flex items-center justify-center overflow-hidden">
           
           {loading && (
@@ -301,7 +284,6 @@ export default function WatchPage() {
             </div>
           )}
 
-          {/* Artplayer Target Div */}
           {!errorMsg && <div ref={playerRef} className="w-full h-full"></div>}
         </div>
       </div>
