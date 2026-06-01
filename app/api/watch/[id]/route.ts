@@ -1,6 +1,5 @@
-// ফাইল পাথ: app/api/watch/[id]/route.ts
 import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import clientPromise from '@/lib/mongodb'; // আপনার mongodb কানেকশন ফাইল
 
 export const dynamic = 'force-dynamic';
 
@@ -8,30 +7,36 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
+    
+    // ডাটাবেস থেকে লিংকের আইডি দিয়ে ডেটা খোঁজা
+    const data = await db.collection("short_links").findOne({ short_id: params.id });
 
-    // ১. posted_streams থেকে স্ট্রিম লিংক আনা
-    const stream = await db.collection("posted_streams").findOne({ short_id: params.id });
-    if (!stream) {
-      return NextResponse.json({ success: false, message: "Stream not found" }, { status: 404 });
+    if (!data) {
+      return NextResponse.json({ success: false, message: 'Stream not found' });
     }
 
-    // ২. short_links থেকে সিকিউরিটি হেডারগুলো (Cookie, User-Agent) আনা
-    const linkData = await db.collection("short_links").findOne({ short_id: params.id });
-
+    // 🎯 প্লেয়ারের কাছে ডাটাবেস থেকে সব ডেটা পাঠানো হচ্ছে
     return NextResponse.json({
       success: true,
-      title: stream.title,
-      streamUrl: stream.stream_url,
-      logo: stream.logo || "https://placehold.co/600x400/1e293b/ef4444?text=LIVE+TV",
+      streamUrl: data.stream_url,
+      title: data.title || "Live Stream",
+      logo: data.logo || "",
       headers: {
-        referer: linkData?.referer || "",
-        origin: linkData?.origin || "",
-        cookie: linkData?.cookie || "",
-        userAgent: linkData?.user_agent || ""
-      }
+        referer: data.referer || "",
+        origin: data.origin || "",
+        cookie: data.cookie || "",
+        userAgent: data.user_agent || ""
+      },
+      stream_type: data.stream_type || "hls",
+      drm_key_id: data.drm_key_id || "",
+      drm_key: data.drm_key || "",
+      start_time: data.start_time || "",
+      end_time: data.end_time || "",
+      proxy_url: data.proxy_url || "" // 🚨 এই লাইনটাই মিসিং ছিল!
     });
 
   } catch (error) {
-    return NextResponse.json({ success: false, message: "Server Error" }, { status: 500 });
+    console.error("API Error:", error);
+    return NextResponse.json({ success: false, message: 'Server error' }, { status: 500 });
   }
 }
