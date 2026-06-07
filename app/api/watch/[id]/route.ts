@@ -1,5 +1,6 @@
+// ফাইল পাথ: app/api/watch/[id]/route.ts
 import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb'; // আপনার mongodb কানেকশন ফাইল
+import clientPromise from '@/lib/mongodb'; 
 
 export const dynamic = 'force-dynamic';
 
@@ -8,14 +9,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const client = await clientPromise;
     const db = client.db("all_in_one_reborn_db");
     
-    // ডাটাবেস থেকে লিংকের আইডি দিয়ে ডেটা খোঁজা
     const data = await db.collection("short_links").findOne({ short_id: params.id });
 
     if (!data) {
       return NextResponse.json({ success: false, message: 'Stream not found' });
     }
 
-    // 🎯 প্লেয়ারের কাছে ডাটাবেস থেকে সব ডেটা পাঠানো হচ্ছে
     return NextResponse.json({
       success: true,
       streamUrl: data.stream_url,
@@ -32,7 +31,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       drm_key: data.drm_key || "",
       start_time: data.start_time || "",
       end_time: data.end_time || "",
-      proxy_url: data.proxy_url || "" // 🚨 এই লাইনটাই মিসিং ছিল!
+      proxy_url: data.proxy_url || "" // ✅ এই লাইনটি এখন ডাটা পাঠাবে
     });
 
   } catch (error) {
