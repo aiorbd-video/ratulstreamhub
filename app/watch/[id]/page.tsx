@@ -49,29 +49,28 @@ export default function WatchPage() {
   const [loading,    setLoading]    = useState(true);
   const [errorMsg,   setErrorMsg]   = useState('');
   const [playMethod, setPlayMethod] = useState<PlayMethod>(null);
-  
-  // 🎯 লাইভ লগ ট্র্যাকিং স্টেট
   const [logs,       setLogs]       = useState<string[]>([]);
 
   const TG_BOT = 'ratulnotific_bot';
 
-  // লগ পুশ করার হেল্পার ফাংশন (ডিপেন্ডেন্সি লুপ এড়াতে ফাংশনাল আপডেট ব্যবহার করা হয়েছে)
   const addLog = (tag: string, msg: string) => {
     const time = new Date().toLocaleTimeString();
     setLogs(prev => [...prev, `[${time}] [${tag}] ${msg}`]);
   };
 
-  // ── Fetch stream metadata ──────────────────────────────────
+  // ── Fetch stream metadata (Fix: Cache bypass added) ────────
   useEffect(() => {
     addLog('API', `স্ট্রিম ডাটা খোঁজা হচ্ছে... ID: ${shortId}`);
-    fetch(`/api/watch/${shortId}`)
+    
+    // 🛠️ Next.js ক্যাশিং জনিত সমস্যা এড়াতে cache: 'no-store' যুক্ত করা হয়েছে
+    fetch(`/api/watch/${shortId}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(data => {
         if (data.success) {
           setStream(data);
           addLog('API', `✅ ডাটা পাওয়া গেছে! টাইটেল: ${data.title}`);
           addLog('API', `🔗 মূল ইউআরএল: ${data.streamUrl}`);
-          addLog('API', `🔁 প্রক্সি ইউআরএল: ${data.proxy_url || '❌ ডাটাবেসে কোনো প্রক্সি লিংক নাই!'}`);
+          addLog('API', `🔁 প্রক্সি ইউআরএল: ${data.proxy_url || 'N/A'}`);
         } else {
           const err = data.message ?? 'স্ট্রিমটি আর সচল নেই বা মুছে ফেলা হয়েছে!';
           setErrorMsg(err);
@@ -86,7 +85,7 @@ export default function WatchPage() {
       });
   }, [shortId]);
 
-  // ── Init player (browser-only, dynamic imports) ────────────
+  // ── Init player ────────────────────────────────────────────
   useEffect(() => {
     if (!stream || !playerRef.current) return;
 
@@ -116,7 +115,6 @@ export default function WatchPage() {
 
       if (dead || !playerRef.current) return;
       const shaka = shakaModule.default ?? shakaModule;
-      addLog('PLAYER', `✅ আর্টপ্লেয়ার এবং লাইব্রেরি মডিউল ইম্পোর্ট সম্পন্ন।`);
 
       // ────────────────────────────────────────────────
       // HLS custom type handler
@@ -150,34 +148,29 @@ export default function WatchPage() {
 
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (dead) return;
-            addLog('HLS', `🎉 ম্যানিফেস্ট পার্সড! ভিডিও চলা শুরু হয়েছে। (${isProxy ? 'Proxy' : 'Direct'})`);
+            addLog('HLS', `🎉 ভিডিও চলা শুরু হয়েছে! (${isProxy ? 'Proxy' : 'Direct'})`);
             setPlayMethod(isProxy ? 'proxy' : 'direct');
             artInst.notice.show = isProxy ? '🔁 Proxy-তে চলছে' : '✅ Direct-এ চলছে';
           });
 
           hls.on(Hls.Events.ERROR, (_: any, data: any) => {
-            addLog('HLS_WARN', `ইভেন্ট এরর কোড: ${data.details} | Fatal: ${data.fatal}`);
             if (!data.fatal) return;
 
+            addLog('HLS_ERR', `❌ Fatal Error এসেছে: ${data.details}`);
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              addLog('HLS_ERR', `❌ নেটওয়ার্ক এরর ধরা পড়েছে!`);
               if (!isProxy && proxyUrl && !proxied) {
                 proxied = true;
                 addLog('HLS', `⚠️ ডিরেক্ট লিংক ফেল করেছে। প্রক্সি লিংকে সুইচ করা হচ্ছে...`);
                 artInst.notice.show = '⚡ Proxy-তে সুইচ হচ্ছে…';
                 loadHls(proxyUrl, true);
               } else {
-                addLog('HLS', `রিকানেক্ট করার চেষ্টা করা হচ্ছে...`);
+                addLog('HLS', `পুনরায় চেষ্টা করা হচ্ছে...`);
                 hls.startLoad();
               }
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-              addLog('HLS_ERR', `মিডিয়া এরর! রিকভার করার চেষ্টা করা হচ্ছে...`);
               hls.recoverMediaError();
             } else {
-              if (!dead) {
-                addLog('HLS_FATAL', `স্ট্রিম লোড হতে সম্পূর্ণ ব্যর্থ।`);
-                setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।');
-              }
+              if (!dead) setErrorMsg('স্ট্রিমটি প্লে হতে ব্যর্থ হয়েছে।');
             }
           });
         }
@@ -191,7 +184,7 @@ export default function WatchPage() {
       async function handleDash(video: HTMLVideoElement, artInst: any) {
         shaka.polyfill.installAll();
         if (!shaka.Player.isBrowserSupported()) {
-          addLog('DASH', `❌ এই ব্রাউজারে DASH সাপোর্ট নেই!`);
+          addLog('DASH', `❌ ব্রাউজার DASH সাপোর্ট করে না`);
           if (!dead) setErrorMsg('এই ব্রাউজারে DASH সাপোর্ট নেই!');
           return;
         }
@@ -207,44 +200,33 @@ export default function WatchPage() {
             bufferBehind:    30,
             retryParameters: { maxAttempts: 3, baseDelay: 1000 },
           },
-          manifest: { retryParameters: { maxAttempts: 3 } },
         };
 
         if (stream!.drm_key_id && stream!.drm_key) {
-          addLog('DASH', `🔐 DRM কী ডিটেক্ট হয়েছে। কি আইডি: ${stream!.drm_key_id}`);
           cfg.drm = { clearKeys: { [stream!.drm_key_id]: stream!.drm_key } };
         }
 
         shak.configure(cfg);
 
         shak.addEventListener('error', (e: any) => {
-          addLog('DASH_ERR', `Shaka Error Code: ${e.detail.code} | Severity: ${e.detail.severity}`);
-          if (
-            e.detail.severity === shaka.util.Error.Severity.CRITICAL &&
-            (proxied || !proxyUrl) &&
-            !dead
-          ) {
-            addLog('DASH_FATAL', `DRM অথবা স্ট্রিম লিংক ক্র্যাশ করেছে।`);
+          if (e.detail.severity === shaka.util.Error.Severity.CRITICAL && (proxied || !proxyUrl) && !dead) {
             setErrorMsg('DRM বা স্ট্রিম লিংকটি কাজ করছে না!');
           }
         });
 
         async function loadDash(url: string, isProxy: boolean) {
           try {
-            addLog('DASH', `${isProxy ? '🔁 প্রক্সি লিংকে' : '⚡ ডিরেক্ট লিংকে'} DASH লোড হচ্ছে...`);
+            addLog('DASH', `DASH লোড হচ্ছে...`);
             await shak.load(url);
             if (dead) return;
-            addLog('DASH', `🎉 DASH সফলভাবে লোড হয়েছে!`);
             setPlayMethod(isProxy ? 'proxy' : 'direct');
             artInst.notice.show = isProxy ? '🔁 Proxy-তে চলছে' : '✅ Direct-এ চলছে';
-          } catch (err) {
+          } catch {
             if (!isProxy && proxyUrl && !proxied) {
               proxied = true;
-              addLog('DASH', `⚠️ ডিরেক্ট লিংক ফেল! প্রক্সিতে ট্রাই করা হচ্ছে...`);
-              artInst.notice.show = '⚡ Proxy-তে সুইচ হচ্ছে…';
+              addLog('DASH', `⚠️ প্রক্সিতে সুইচ করা হচ্ছে...`);
               loadDash(proxyUrl, true);
             } else if (!dead) {
-              addLog('DASH_FATAL', `DASH স্ট্রিম প্লে করতে ব্যর্থ।`);
               setErrorMsg('স্ট্রিমটি লোড হয়নি।');
             }
           }
@@ -254,9 +236,8 @@ export default function WatchPage() {
       }
 
       // ────────────────────────────────────────────────
-      // Create ArtPlayer instance
+      // Create ArtPlayer instance (Fix: Privacy & Referrer added)
       // ────────────────────────────────────────────────
-      addLog('PLAYER', `আর্টপ্লেয়ার কনফিগারেশন ইনিশিয়েট হচ্ছে...`);
       art = new Artplayer({
         container: playerRef.current!,
         url:       stream!.streamUrl,
@@ -272,6 +253,13 @@ export default function WatchPage() {
         setting:       true,
         fullscreen:    true,
         theme:         '#ef4444',
+
+        // 🛠️ ফিক্স: ডোমেইন বা অরিজিন ইনফো স্ট্রিমিং সার্ভার থেকে সম্পূর্ণ হাইড করার জন্য হেডার পলিসি
+        videoAttribute: {
+          crossOrigin: 'anonymous',
+          referrerPolicy: 'no-referrer', 
+        },
+
         customType: {
           m3u8: (video: HTMLVideoElement, _url: string, inst: any) => {
             handleHls(video, inst);
@@ -283,16 +271,13 @@ export default function WatchPage() {
       });
     }
 
-    init().catch(e => {
-      addLog('CRITICAL_ERR', `প্লেয়ার ক্র্যাশ করেছে: ${e.message}`);
-    });
+    init().catch(e => addLog('CRITICAL_ERR', e.message));
 
     return () => {
       dead = true;
       hls?.destroy();
       shak?.destroy();
       art?.destroy?.(false);
-      addLog('PLAYER', `প্লেয়ার রিলিজ (Cleanup) করা হয়েছে।`);
     };
   }, [stream]);
 
@@ -376,19 +361,14 @@ export default function WatchPage() {
         </div>
       </div>
 
-      {/* 🎯 নতুন যুক্ত করা লাইভ ডেভলপার লগ টার্মিনাল UI */}
+      {/* Live Logs Terminal UI */}
       <div className="w-full max-w-[1400px] mt-4 p-4 bg-[#0c0c14] rounded-2xl border border-white/5 font-mono text-xs shadow-2xl">
         <div className="flex justify-between items-center mb-2 border-b border-white/5 pb-2 text-white/40 font-sans font-bold">
           <span className="flex items-center gap-2 text-red-400">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
             🖥️ Live Debug Logs (লাইভ ট্র্যাকিং টার্মিনাল)
           </span>
-          <button 
-            onClick={() => setLogs([])} 
-            className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded-lg text-white transition-all"
-          >
-            Clear Logs
-          </button>
+          <button onClick={() => setLogs([])} className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded-lg text-white transition-all">Clear Logs</button>
         </div>
         <div className="h-44 overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-white/5 pr-2">
           {logs.length === 0 ? (
