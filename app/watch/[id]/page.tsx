@@ -58,11 +58,10 @@ export default function WatchPage() {
     setLogs(prev => [...prev, `[${time}] [${tag}] ${msg}`]);
   };
 
-  // ── Fetch stream metadata (Fix: Cache bypass added) ────────
+  // ── Fetch stream metadata ──────────────────────────────────
   useEffect(() => {
     addLog('API', `স্ট্রিম ডাটা খোঁজা হচ্ছে... ID: ${shortId}`);
     
-    // 🛠️ Next.js ক্যাশিং জনিত সমস্যা এড়াতে cache: 'no-store' যুক্ত করা হয়েছে
     fetch(`/api/watch/${shortId}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(data => {
@@ -236,9 +235,9 @@ export default function WatchPage() {
       }
 
       // ────────────────────────────────────────────────
-      // Create ArtPlayer instance (Fix: Privacy & Referrer added)
+      // Create ArtPlayer instance
       // ────────────────────────────────────────────────
-      art = new Artplayer({
+      const artConfig: any = {
         container: playerRef.current!,
         url:       stream!.streamUrl,
         type:      isDash ? 'mpd' : 'm3u8',
@@ -254,8 +253,8 @@ export default function WatchPage() {
         fullscreen:    true,
         theme:         '#ef4444',
 
-        // 🛠️ ফিক্স: ডোমেইন বা অরিজিন ইনফো স্ট্রিমিং সার্ভার থেকে সম্পূর্ণ হাইড করার জন্য হেডার পলিসি
-        videoAttribute: {
+        // ✅ ফিক্স: 'videoAttribute' কে 'videoAttributes' করা হলো এবং টাইপ ক্যাসিং নিরাপদ করা হলো
+        videoAttributes: {
           crossOrigin: 'anonymous',
           referrerPolicy: 'no-referrer', 
         },
@@ -268,7 +267,9 @@ export default function WatchPage() {
             await handleDash(video, inst);
           },
         },
-      });
+      };
+
+      art = new Artplayer(artConfig);
     }
 
     init().catch(e => addLog('CRITICAL_ERR', e.message));
